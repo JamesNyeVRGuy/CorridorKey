@@ -184,13 +184,13 @@ class NodeAgent:
 
         if job_type == "inference":
             # Need input frames and alpha hints
-            self.file_transfer.download_pass(clip_name, "input", os.path.join(clip_dir, "Frames", "Input"))
-            self.file_transfer.download_pass(clip_name, "alpha", os.path.join(clip_dir, "AlphaHint"))
+            self.file_transfer.download_pass(clip_name, "input", clip_dir)
+            self.file_transfer.download_pass(clip_name, "alpha", clip_dir)
         elif job_type == "gvm_alpha":
-            self.file_transfer.download_pass(clip_name, "input", os.path.join(clip_dir, "Frames", "Input"))
+            self.file_transfer.download_pass(clip_name, "input", clip_dir)
         elif job_type == "videomama_alpha":
-            self.file_transfer.download_pass(clip_name, "input", os.path.join(clip_dir, "Frames", "Input"))
-            self.file_transfer.download_pass(clip_name, "mask", os.path.join(clip_dir, "VideoMamaMaskHint"))
+            self.file_transfer.download_pass(clip_name, "input", clip_dir)
+            self.file_transfer.download_pass(clip_name, "mask", clip_dir)
 
         return base_dir
 

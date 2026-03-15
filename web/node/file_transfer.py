@@ -25,22 +25,36 @@ class FileTransfer:
     def _url(self, path: str) -> str:
         return f"{self.main_url}/api/nodes/{self.node_id}/files/{path}"
 
-    def list_files(self, clip_name: str, pass_name: str) -> list[str]:
-        """List files available for a clip pass."""
+    def list_files(self, clip_name: str, pass_name: str) -> tuple[str | None, list[str]]:
+        """List files available for a clip pass.
+
+        Returns (directory_name, file_list). directory_name is the actual
+        subdirectory on the server (e.g. "Frames" or "Input").
+        """
         with httpx.Client(timeout=30) as client:
             r = client.get(self._url(f"{clip_name}/{pass_name}"))
             r.raise_for_status()
-            return r.json().get("files", [])
+            data = r.json()
+            return data.get("directory"), data.get("files", [])
 
-    def download_pass(self, clip_name: str, pass_name: str, dest_dir: str) -> int:
-        """Download all files for a clip pass to a local directory.
+    def download_pass(self, clip_name: str, pass_name: str, clip_dir: str) -> int:
+        """Download all files for a clip pass into the correct subdirectory.
+
+        Uses the server's reported directory name so the local layout
+        matches what clip_state scanning expects.
+
+        Args:
+            clip_name: Name of the clip.
+            pass_name: Pass type ("input", "alpha", "mask", "source").
+            clip_dir: Local clip root directory (files go into a subdirectory).
 
         Returns the number of files downloaded.
         """
-        files = self.list_files(clip_name, pass_name)
-        if not files:
+        directory, files = self.list_files(clip_name, pass_name)
+        if not files or not directory:
             return 0
 
+        dest_dir = os.path.join(clip_dir, directory)
         os.makedirs(dest_dir, exist_ok=True)
         count = 0
 
@@ -59,7 +73,7 @@ class FileTransfer:
                             f.write(chunk)
                 count += 1
 
-        logger.info(f"Downloaded {count} files for {clip_name}/{pass_name}")
+        logger.info(f"Downloaded {count} files for {clip_name}/{pass_name} → {directory}/")
         return count
 
     def upload_file(self, clip_name: str, pass_name: str, file_path: str) -> None:
