@@ -6,6 +6,7 @@
 	import { refreshClips } from '$lib/stores/clips';
 	import { refreshJobs, updateJobFromWS, currentJob, runningJobs, activeJobCount } from '$lib/stores/jobs';
 	import { refreshDevice, refreshVRAM, device, vram, wsConnected } from '$lib/stores/system';
+	import { refreshNodes, updateNodeFromWS, removeNodeFromWS, nodes } from '$lib/stores/nodes';
 	import VramMeter from '../components/VramMeter.svelte';
 	import ToastContainer from '../components/ToastContainer.svelte';
 	import KeyboardHelp from '../components/KeyboardHelp.svelte';
@@ -18,6 +19,7 @@
 	const navItems = [
 		{ href: '/clips', label: 'Clips', icon: 'film' },
 		{ href: '/jobs', label: 'Jobs', icon: 'layers' },
+		{ href: '/nodes', label: 'Nodes', icon: 'server' },
 		{ href: '/settings', label: 'Settings', icon: 'sliders' },
 	];
 
@@ -31,6 +33,7 @@
 		refreshVRAM();
 		refreshClips();
 		refreshJobs();
+		refreshNodes();
 
 		const unsubWs = onMessage((msg) => {
 			if (msg.type === 'job:progress') {
@@ -58,6 +61,10 @@
 				vram.set({ ...d, available: true });
 			} else if (msg.type === 'clip:state_changed') {
 				refreshClips();
+			} else if (msg.type === 'node:update') {
+				updateNodeFromWS(msg.data as import('$lib/stores/nodes').NodeInfo);
+			} else if (msg.type === 'node:offline') {
+				removeNodeFromWS((msg.data as { node_id: string }).node_id);
 			}
 		});
 
@@ -97,6 +104,8 @@
 								<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><rect x="2" y="3" width="12" height="10" rx="1.5" stroke="currentColor" stroke-width="1.2"/><path d="M5 3v10M11 3v10M2 6.5h3M11 6.5h3M2 9.5h3M11 9.5h3" stroke="currentColor" stroke-width="1.0"/></svg>
 							{:else if item.icon === 'layers'}
 								<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M2 8l6 3.5L14 8M2 10.5l6 3.5 6-3.5M2 5.5L8 9l6-3.5L8 2 2 5.5z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>
+							{:else if item.icon === 'server'}
+								<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><rect x="2" y="2" width="12" height="4" rx="1" stroke="currentColor" stroke-width="1.2"/><rect x="2" y="10" width="12" height="4" rx="1" stroke="currentColor" stroke-width="1.2"/><path d="M2 8h12" stroke="currentColor" stroke-width="1.0" stroke-dasharray="2 1.5"/><circle cx="5" cy="4" r="0.8" fill="currentColor"/><circle cx="5" cy="12" r="0.8" fill="currentColor"/></svg>
 							{:else if item.icon === 'sliders'}
 								<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><line x1="2" y1="4" x2="14" y2="4" stroke="currentColor" stroke-width="1.2"/><line x1="2" y1="8" x2="14" y2="8" stroke="currentColor" stroke-width="1.2"/><line x1="2" y1="12" x2="14" y2="12" stroke="currentColor" stroke-width="1.2"/><circle cx="5" cy="4" r="1.5" fill="var(--surface-2)" stroke="currentColor" stroke-width="1.2"/><circle cx="10" cy="8" r="1.5" fill="var(--surface-2)" stroke="currentColor" stroke-width="1.2"/><circle cx="7" cy="12" r="1.5" fill="var(--surface-2)" stroke="currentColor" stroke-width="1.2"/></svg>
 							{/if}
@@ -104,6 +113,9 @@
 						<span class="nav-label">{item.label}</span>
 						{#if item.href === '/jobs' && $activeJobCount > 0}
 							<span class="nav-badge mono">{$activeJobCount}</span>
+						{/if}
+						{#if item.href === '/nodes' && $nodes.length > 0}
+							<span class="nav-badge mono">{$nodes.length}</span>
 						{/if}
 					</a>
 				{/each}

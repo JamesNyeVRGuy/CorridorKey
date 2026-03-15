@@ -2,6 +2,8 @@
 
 import logging
 import os
+import subprocess
+from dataclasses import dataclass
 
 import torch
 
@@ -65,6 +67,69 @@ def resolve_device(requested: str | None = None) -> str:
             )
 
     return device
+
+
+@dataclass
+class GPUInfo:
+    """Information about a single GPU."""
+
+    index: int
+    name: str
+    vram_total_gb: float
+    vram_free_gb: float
+
+
+def enumerate_gpus() -> list[GPUInfo]:
+    """List all available CUDA GPUs with VRAM info via nvidia-smi.
+
+    Falls back to torch.cuda if nvidia-smi is unavailable.
+    Returns an empty list on non-CUDA systems.
+    """
+    gpus: list[GPUInfo] = []
+
+    # Try nvidia-smi first (sees all GPUs regardless of CUDA_VISIBLE_DEVICES)
+    try:
+        result = subprocess.run(
+            [
+                "nvidia-smi",
+                "--query-gpu=index,name,memory.total,memory.free",
+                "--format=csv,nounits,noheader",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            for line in result.stdout.strip().split("\n"):
+                parts = [p.strip() for p in line.split(",")]
+                if len(parts) >= 4:
+                    gpus.append(
+                        GPUInfo(
+                            index=int(parts[0]),
+                            name=parts[1],
+                            vram_total_gb=float(parts[2]) / 1024,
+                            vram_free_gb=float(parts[3]) / 1024,
+                        )
+                    )
+            return gpus
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        pass
+
+    # Fallback to torch
+    if torch.cuda.is_available():
+        for i in range(torch.cuda.device_count()):
+            props = torch.cuda.get_device_properties(i)
+            total = props.total_memory / (1024**3)
+            gpus.append(
+                GPUInfo(
+                    index=i,
+                    name=props.name,
+                    vram_total_gb=total,
+                    vram_free_gb=total,  # can't query free without setting device
+                )
+            )
+
+    return gpus
 
 
 def clear_device_cache(device: torch.device | str) -> None:

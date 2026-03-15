@@ -201,8 +201,7 @@ def _chain_next_pipeline_step(job: GPUJob, queue: GPUJobQueue, clips_dir: str, s
 
 
 def _run_job(service: CorridorKeyService, job: GPUJob, queue: GPUJobQueue, clips_dir: str) -> None:
-    """Run a single job (called from thread pool)."""
-    queue.start_job(job)
+    """Run a single job (called from thread pool). Job must already be claimed."""
     manager.send_job_status(job.id, JobStatus.RUNNING.value)
 
     try:
@@ -276,29 +275,33 @@ def worker_loop(
             _running_gpu_count -= 1
 
     while not stop_event.is_set():
-        job = queue.next_job()
-        if job is None:
+        # Peek first to check type before claiming
+        peeked = queue.next_job()
+        if peeked is None:
             stop_event.wait(0.5)
             continue
 
-        is_cpu = job.job_type in _CPU_JOB_TYPES
+        is_cpu = peeked.job_type in _CPU_JOB_TYPES
 
         if is_cpu:
-            # CPU jobs always start immediately
+            job = queue.claim_job("local")
+            if job is None:
+                continue
             future = cpu_pool.submit(_run_job, service, job, queue, clips_dir)
         else:
-            # GPU job — check VRAM and concurrency
+            # GPU job — check VRAM and concurrency before claiming
             with _running_gpu_lock:
                 if _running_gpu_count >= max_gpu_workers:
-                    # Pool full, wait
                     stop_event.wait(0.5)
                     continue
 
                 if not _can_start_gpu_job():
-                    # Not enough VRAM, wait and retry
                     stop_event.wait(1.0)
                     continue
 
+                job = queue.claim_job("local")
+                if job is None:
+                    continue
                 _running_gpu_count += 1
 
             future = gpu_pool.submit(_run_job, service, job, queue, clips_dir)

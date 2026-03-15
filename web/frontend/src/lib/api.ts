@@ -222,5 +222,16 @@ export const api = {
 	preview: {
 		url: (clipName: string, passName: string, frame: number) =>
 			`${BASE}/api/preview/${encodeURIComponent(clipName)}/${passName}/${frame}`
+	},
+	nodes: {
+		list: () => request<import('$lib/stores/nodes').NodeInfo[]>('GET', '/api/nodes'),
+		remove: (nodeId: string) => request<unknown>('DELETE', `/api/nodes/${encodeURIComponent(nodeId)}`)
+	},
+	system2: {
+		localGpus: () =>
+			request<{ index: number; name: string; vram_total_gb: number; vram_free_gb: number }[]>(
+				'GET',
+				'/api/system/gpus'
+			)
 	}
 };

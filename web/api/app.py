@@ -14,7 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from backend.project import projects_root
 
 from .deps import get_queue, get_service
-from .routes import clips, jobs, preview, projects, system, upload
+from .routes import clips, jobs, nodes, preview, projects, system, upload
 from .worker import start_worker
 from .ws import manager, websocket_endpoint
 
@@ -76,6 +76,7 @@ def create_app() -> FastAPI:
     app.include_router(system.router)
     app.include_router(preview.router)
     app.include_router(projects.router)
+    app.include_router(nodes.router)
     app.include_router(upload.router)
 
     # WebSocket

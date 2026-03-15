@@ -168,6 +168,28 @@ class GPUJobQueue:
                 return self._queue[0]
             return None
 
+    def claim_job(self, claimer_id: str = "local") -> GPUJob | None:
+        """Atomically pop the next job and mark it as running.
+
+        This is the preferred method for distributed workers — it combines
+        next_job() + start_job() in a single lock acquisition so two
+        workers can't claim the same job.
+
+        Args:
+            claimer_id: Identifier of the worker claiming the job (node_id or "local").
+
+        Returns:
+            The claimed job, or None if the queue is empty.
+        """
+        with self._lock:
+            if not self._queue:
+                return None
+            job = self._queue.popleft()
+            job.status = JobStatus.RUNNING
+            self._current_job = job
+            logger.info(f"Job claimed [{job.id}] by {claimer_id}: {job.job_type.value} for '{job.clip_name}'")
+            return job
+
     def start_job(self, job: GPUJob) -> None:
         """Mark a job as running. Must be called before processing."""
         with self._lock:

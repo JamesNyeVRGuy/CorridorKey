@@ -56,3 +56,24 @@ services:
       - ./CorridorKeyModule/checkpoints:/app/CorridorKeyModule/checkpoints
       - ./gvm_core/weights:/app/gvm_core/weights
       - ./VideoMaMaInferenceModule/checkpoints:/app/VideoMaMaInferenceModule/checkpoints
+
+  corridorkey-node:
+    profiles: ["node"]
+    build:
+      context: .
+      dockerfile: web/Dockerfile.node
+    image: corridorkey-node:latest
+    gpus: ${CK_GPUS:-all}
+    environment:
+      - OPENCV_IO_ENABLE_OPENEXR=1
+      - NVIDIA_VISIBLE_DEVICES=${NVIDIA_VISIBLE_DEVICES:-all}
+      - NVIDIA_DRIVER_CAPABILITIES=${NVIDIA_DRIVER_CAPABILITIES:-compute,utility,video}
+      - CK_MAIN_URL=${CK_MAIN_URL:-http://corridorkey-web:3000}
+      - CK_NODE_NAME=${CK_NODE_NAME:-docker-node}
+      - CK_NODE_GPUS=${CK_NODE_GPUS:-auto}
+      - CK_SHARED_STORAGE=${CK_SHARED_STORAGE:-/app/Projects}
+    volumes:
+      - ./Projects:/app/Projects
+      - ./CorridorKeyModule/checkpoints:/app/CorridorKeyModule/checkpoints
+      - ./gvm_core/weights:/app/gvm_core/weights
+      - ./VideoMaMaInferenceModule/checkpoints:/app/VideoMaMaInferenceModule/checkpoints

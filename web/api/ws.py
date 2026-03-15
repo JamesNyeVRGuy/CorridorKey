@@ -92,6 +92,22 @@ class ConnectionManager:
             }
         )
 
+    def send_node_update(self, node_data: dict) -> None:
+        self.broadcast_sync(
+            {
+                "type": "node:update",
+                "data": node_data,
+            }
+        )
+
+    def send_node_offline(self, node_id: str) -> None:
+        self.broadcast_sync(
+            {
+                "type": "node:offline",
+                "data": {"node_id": node_id},
+            }
+        )
+
 
 manager = ConnectionManager()
 

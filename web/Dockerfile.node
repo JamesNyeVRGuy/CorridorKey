@@ -1,0 +1,34 @@
+# Lightweight node agent image for CorridorKey distributed processing.
+#
+# Build:  docker build -f web/Dockerfile.node -t corridorkey-node .
+# Run:    docker run --gpus all -e CK_MAIN_URL=http://host:3000 corridorkey-node
+
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# System deps for OpenCV and torch
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgl1 libglib2.0-0 libsm6 libxrender1 libxext6 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install uv for fast dependency resolution
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+# Copy only what the node agent needs
+COPY pyproject.toml uv.lock ./
+COPY device_utils.py ./
+COPY backend/ backend/
+COPY CorridorKeyModule/ CorridorKeyModule/
+COPY web/__init__.py web/__init__.py
+COPY web/shared/ web/shared/
+COPY web/node/ web/node/
+
+# Install dependencies (CPU-only by default; use --extra cuda for GPU)
+RUN uv sync --frozen --no-dev
+
+ENV CK_MAIN_URL=http://localhost:3000
+ENV CK_NODE_NAME=docker-node
+ENV CK_NODE_GPUS=auto
+
+CMD ["uv", "run", "python", "-m", "web.node"]

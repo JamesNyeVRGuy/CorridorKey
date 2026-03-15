@@ -58,6 +58,23 @@ def _weights_info() -> dict:
     }
 
 
+@router.get("/gpus")
+def get_gpus():
+    """List all available GPUs on this machine."""
+    from device_utils import enumerate_gpus
+
+    gpus = enumerate_gpus()
+    return [
+        {
+            "index": g.index,
+            "name": g.name,
+            "vram_total_gb": round(g.vram_total_gb, 1),
+            "vram_free_gb": round(g.vram_free_gb, 1),
+        }
+        for g in gpus
+    ]
+
+
 @router.get("/device", response_model=DeviceResponse)
 def get_device():
     service = get_service()
