@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from backend.job_queue import JobStatus
 from backend.natural_sort import natsorted
 
+from .. import persist
 from ..deps import get_queue, get_service
 from ..nodes import GPUSlot, NodeInfo, NodeSchedule, registry
 from ..routes import clips as _clips_mod
@@ -33,6 +34,33 @@ def _check_node_auth(request: Request) -> None:
 
 
 router = APIRouter(prefix="/api/nodes", tags=["nodes"], dependencies=[Depends(_check_node_auth)])
+
+
+def _save_node_config(node_id: str, node: NodeInfo) -> None:
+    """Persist UI-configurable node settings."""
+    configs = persist.load_key("node_configs", {})
+    configs[node_id] = {
+        "paused": node.paused,
+        "schedule": node.schedule.to_dict(),
+        "accepted_types": node.accepted_types,
+    }
+    persist.save_key("node_configs", configs)
+
+
+def _restore_node_config(node: NodeInfo) -> None:
+    """Restore persisted settings when a node re-registers."""
+    configs = persist.load_key("node_configs", {})
+    cfg = configs.get(node.node_id)
+    if cfg:
+        node.paused = cfg.get("paused", False)
+        sched = cfg.get("schedule", {})
+        if sched:
+            node.schedule = NodeSchedule(
+                enabled=sched.get("enabled", False),
+                start=sched.get("start", "00:00"),
+                end=sched.get("end", "23:59"),
+            )
+        node.accepted_types = cfg.get("accepted_types", [])
 
 
 # --- Schemas ---
@@ -92,9 +120,11 @@ def register_node(req: NodeRegisterRequest):
         accepted_types=req.accepted_types,
     )
     registry.register(info)
-    # Re-fetch to get the merged state (register preserves UI-set fields)
+    # Re-fetch to get the merged state (register preserves UI-set fields on re-register)
     node = registry.get_node(req.node_id)
-    manager.send_node_update(node.to_dict() if node else info.to_dict())
+    if node:
+        _restore_node_config(node)
+        manager.send_node_update(node.to_dict())
     return {"status": "registered", "node_id": req.node_id}
 
 
@@ -138,6 +168,7 @@ def pause_node(node_id: str):
     if not node:
         raise HTTPException(status_code=404, detail=f"Node '{node_id}' not found")
     node.paused = True
+    _save_node_config(node_id, node)
     manager.send_node_update(node.to_dict())
     return {"status": "paused"}
 
@@ -149,6 +180,7 @@ def resume_node(node_id: str):
     if not node:
         raise HTTPException(status_code=404, detail=f"Node '{node_id}' not found")
     node.paused = False
+    _save_node_config(node_id, node)
     manager.send_node_update(node.to_dict())
     return {"status": "resumed"}
 
@@ -169,6 +201,7 @@ def set_node_schedule(node_id: str, req: NodeScheduleRequest):
     if not node:
         raise HTTPException(status_code=404, detail=f"Node '{node_id}' not found")
     node.schedule = NodeSchedule(enabled=req.enabled, start=req.start, end=req.end)
+    _save_node_config(node_id, node)
     manager.send_node_update(node.to_dict())
     return node.schedule.to_dict()
 
@@ -184,6 +217,7 @@ def set_accepted_types(node_id: str, req: AcceptedTypesRequest):
     if not node:
         raise HTTPException(status_code=404, detail=f"Node '{node_id}' not found")
     node.accepted_types = req.accepted_types
+    _save_node_config(node_id, node)
     manager.send_node_update(node.to_dict())
     return {"accepted_types": node.accepted_types}
 

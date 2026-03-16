@@ -35,6 +35,9 @@ def set_local_gpu_enabled(enabled: bool) -> None:
     global _local_gpu_enabled
     _local_gpu_enabled = enabled
     logger.info(f"Local GPU processing {'enabled' if enabled else 'disabled (remote-only)'}")
+    from . import persist
+
+    persist.save_key("local_gpu_enabled", enabled)
 
 
 def get_local_gpu_enabled() -> bool:
@@ -45,6 +48,22 @@ def set_vram_limit(gb: float) -> None:
     global _vram_limit_gb
     _vram_limit_gb = max(0.0, gb)
     logger.info(f"VRAM limit set to {_vram_limit_gb:.1f} GB")
+    from . import persist
+
+    persist.save_key("vram_limit_gb", gb)
+
+
+def restore_settings() -> None:
+    """Restore persisted settings on startup."""
+    global _local_gpu_enabled, _vram_limit_gb
+    from . import persist
+
+    _local_gpu_enabled = persist.load_key("local_gpu_enabled", True)
+    _vram_limit_gb = persist.load_key("vram_limit_gb", 0.0)
+    if not _local_gpu_enabled:
+        logger.info("Restored setting: local GPU processing disabled (remote-only)")
+    if _vram_limit_gb > 0:
+        logger.info(f"Restored setting: VRAM limit {_vram_limit_gb:.1f} GB")
 
 
 def get_vram_limit() -> float:

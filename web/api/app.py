@@ -13,6 +13,7 @@ from fastapi.staticfiles import StaticFiles
 
 from backend.project import projects_root
 
+from . import persist
 from .deps import get_queue, get_service
 from .reaper import start_reaper
 from .routes import clips, jobs, nodes, preview, projects, system, upload
@@ -39,6 +40,12 @@ async def lifespan(app: FastAPI):
 
     clips.set_clips_dir(clips_dir)
     preview.set_clips_dir(clips_dir)
+    persist.init(clips_dir)
+
+    # Restore persisted settings before starting workers
+    from .worker import restore_settings
+
+    restore_settings()
 
     service = get_service()
     device = service.detect_device()
