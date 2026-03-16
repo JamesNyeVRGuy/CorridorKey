@@ -31,3 +31,5 @@ AUTH_TOKEN: str = _get("CK_AUTH_TOKEN", "")  # shared secret for node auth
 # Comma-separated job types this node accepts. Empty = all.
 # Valid types: inference, gvm_alpha, videomama_alpha, video_extract, video_stitch
 ACCEPTED_TYPES: str = _get("CK_NODE_ACCEPTED_TYPES", "")
+# Pre-load model into VRAM on startup (avoids cold-start delay on first job)
+PREWARM: bool = _get("CK_NODE_PREWARM", "true").lower() in ("true", "1", "yes")

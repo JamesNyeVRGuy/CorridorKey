@@ -50,6 +50,25 @@ class NodeAgent:
             return [g.index for g in gpus] if gpus else [0]
         return [int(x.strip()) for x in config.NODE_GPUS.split(",") if x.strip()]
 
+    def _prewarm(self) -> None:
+        """Pre-load the CorridorKey model into VRAM to avoid cold-start delay."""
+        logger.info("Pre-warming model into VRAM...")
+        os.environ["CUDA_VISIBLE_DEVICES"] = str(self._gpu_indices[0])
+        try:
+            import time as _time
+
+            t0 = _time.monotonic()
+            from backend.service import CorridorKeyService
+
+            svc = CorridorKeyService()
+            svc.detect_device()
+            # Access the engine to trigger model loading
+            svc._get_engine()
+            elapsed = _time.monotonic() - t0
+            logger.info(f"Model pre-warmed in {elapsed:.1f}s")
+        except Exception as e:
+            logger.warning(f"Pre-warm failed (will load on first job): {e}")
+
     def _host_ip(self) -> str:
         """Best-effort local IP for registration."""
         try:
@@ -353,6 +372,10 @@ class NodeAgent:
             sync_weights(self.main_url)
         except Exception as e:
             logger.warning(f"Weight sync failed (will try to proceed): {e}")
+
+        # Pre-warm model into VRAM
+        if config.PREWARM:
+            self._prewarm()
 
         # Register (retry until success)
         while not self._stop.is_set():
