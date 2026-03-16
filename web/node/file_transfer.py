@@ -1,17 +1,23 @@
 """File transfer utilities for nodes without shared storage.
 
 Downloads input frames from the main machine and uploads results back.
+Limits concurrent transfers to avoid saturating the network.
 """
 
 from __future__ import annotations
 
 import logging
 import os
+import threading
 from pathlib import Path
 
 import httpx
 
 logger = logging.getLogger(__name__)
+
+# Max concurrent file transfers across all nodes on this machine.
+# Prevents multiple jobs from saturating the network simultaneously.
+_transfer_semaphore = threading.Semaphore(2)
 
 
 class FileTransfer:
@@ -42,7 +48,8 @@ class FileTransfer:
         """Download all files for a clip pass into the correct subdirectory.
 
         Uses the server's reported directory name so the local layout
-        matches what clip_state scanning expects.
+        matches what clip_state scanning expects. Acquires the transfer
+        semaphore to limit network saturation.
 
         Args:
             clip_name: Name of the clip.
@@ -59,7 +66,7 @@ class FileTransfer:
         os.makedirs(dest_dir, exist_ok=True)
         count = 0
 
-        with httpx.Client(timeout=self.timeout, headers=self._headers) as client:
+        with _transfer_semaphore, httpx.Client(timeout=self.timeout, headers=self._headers) as client:
             for fname in files:
                 dest_path = os.path.join(dest_dir, fname)
                 if os.path.isfile(dest_path):
@@ -67,11 +74,19 @@ class FileTransfer:
                     continue  # skip already downloaded
 
                 url = self._url(f"{clip_name}/{pass_name}/{fname}")
-                with client.stream("GET", url) as resp:
-                    resp.raise_for_status()
-                    with open(dest_path, "wb") as f:
-                        for chunk in resp.iter_bytes(chunk_size=8 * 1024 * 1024):
-                            f.write(chunk)
+                tmp_path = dest_path + ".part"
+                try:
+                    with client.stream("GET", url) as resp:
+                        resp.raise_for_status()
+                        with open(tmp_path, "wb") as f:
+                            for chunk in resp.iter_bytes(chunk_size=8 * 1024 * 1024):
+                                f.write(chunk)
+                    os.replace(tmp_path, dest_path)
+                except Exception:
+                    # Clean up partial file on failure
+                    if os.path.isfile(tmp_path):
+                        os.remove(tmp_path)
+                    raise
                 count += 1
 
         logger.info(f"Downloaded {count} files for {clip_name}/{pass_name} → {directory}/")
@@ -82,7 +97,7 @@ class FileTransfer:
         fname = Path(file_path).name
         url = self._url(f"{clip_name}/{pass_name}/{fname}")
 
-        with httpx.Client(timeout=self.timeout, headers=self._headers) as client:
+        with _transfer_semaphore, httpx.Client(timeout=self.timeout, headers=self._headers) as client:
             with open(file_path, "rb") as f:
                 r = client.post(url, files={"file": (fname, f)})
                 r.raise_for_status()
