@@ -13,6 +13,7 @@ import sys
 
 from . import config
 from .agent import NodeAgent
+from .log_buffer import install as install_log_buffer
 
 
 def main() -> None:
@@ -20,6 +21,7 @@ def main() -> None:
         level=logging.INFO,
         format="%(asctime)s %(name)s %(levelname)s %(message)s",
     )
+    install_log_buffer()
 
     if config.MAIN_URL == "http://localhost:3000":
         logging.getLogger(__name__).warning(

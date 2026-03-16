@@ -85,6 +85,12 @@ class NodeInfo:
     schedule: NodeSchedule = field(default_factory=NodeSchedule)
     # Empty list = accept all job types. Non-empty = only these types.
     accepted_types: list[str] = field(default_factory=list)
+    recent_logs: list[str] = field(default_factory=list, repr=False)
+
+    def append_logs(self, lines: list[str], max_lines: int = 200) -> None:
+        self.recent_logs.extend(lines)
+        if len(self.recent_logs) > max_lines:
+            self.recent_logs = self.recent_logs[-max_lines:]
 
     @property
     def is_alive(self) -> bool:

@@ -27,6 +27,8 @@
 		{ value: 'video_extract', label: 'Extract' },
 		{ value: 'video_stitch', label: 'Stitch' }
 	];
+	let viewingLogs = $state<string | null>(null);
+	let logLines = $state<string[]>([]);
 
 	onMount(() => {
 		refreshNodes();
@@ -133,6 +135,21 @@
 
 	function cancelTypesEdit() {
 		editingTypes = null;
+	}
+
+	async function toggleLogs(nodeId: string) {
+		if (viewingLogs === nodeId) {
+			viewingLogs = null;
+			return;
+		}
+		try {
+			const res = await api.nodes.getLogs(nodeId);
+			logLines = res.logs;
+			viewingLogs = nodeId;
+		} catch {
+			logLines = ['Failed to fetch logs'];
+			viewingLogs = nodeId;
+		}
 	}
 
 	function formatTypes(node: NodeInfo): string {
@@ -285,6 +302,14 @@
 								</button>
 								<button
 									class="btn-icon"
+									class:active={viewingLogs === node.node_id}
+									title="View logs"
+									onclick={() => toggleLogs(node.node_id)}
+								>
+									<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M3 4h10M3 7h8M3 10h6M3 13h9" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+								</button>
+								<button
+									class="btn-icon"
 									title="Job types"
 									onclick={() => openTypesEditor(node)}
 								>
@@ -363,6 +388,17 @@
 									<button class="btn-save" onclick={saveTypes}>Save</button>
 									<button class="btn-cancel" onclick={cancelTypesEdit}>Cancel</button>
 								</div>
+							</div>
+						{/if}
+
+						<!-- Log viewer -->
+						{#if viewingLogs === node.node_id}
+							<div class="node-logs">
+								{#if logLines.length === 0}
+									<p class="log-empty mono">No logs yet</p>
+								{:else}
+									<pre class="log-output mono">{logLines.join('\n')}</pre>
+								{/if}
 							</div>
 						{/if}
 
@@ -957,6 +993,35 @@
 
 	.type-chip input {
 		display: none;
+	}
+
+	.btn-icon.active {
+		color: var(--accent);
+		background: var(--accent-muted);
+	}
+
+	.node-logs {
+		margin-top: var(--sp-2);
+	}
+
+	.log-empty {
+		font-size: 11px;
+		color: var(--text-tertiary);
+		padding: var(--sp-2);
+	}
+
+	.log-output {
+		font-size: 10px;
+		color: var(--text-secondary);
+		background: var(--surface-0);
+		border: 1px solid var(--border);
+		border-radius: 4px;
+		padding: var(--sp-3);
+		max-height: 300px;
+		overflow: auto;
+		white-space: pre-wrap;
+		word-break: break-all;
+		line-height: 1.5;
 	}
 
 	.node-heartbeat {

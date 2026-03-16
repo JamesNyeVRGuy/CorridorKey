@@ -234,7 +234,9 @@ export const api = {
 		setAcceptedTypes: (nodeId: string, types: string[]) =>
 			request<unknown>('PUT', `/api/nodes/${encodeURIComponent(nodeId)}/accepted-types`, {
 				accepted_types: types
-			})
+			}),
+		getLogs: (nodeId: string) =>
+			request<{ logs: string[] }>('GET', `/api/nodes/${encodeURIComponent(nodeId)}/logs`)
 	},
 	system2: {
 		localGpus: () =>

@@ -89,6 +89,7 @@ class NodeRegisterRequest(BaseModel):
 class NodeHeartbeatRequest(BaseModel):
     vram_free_gb: float = 0.0
     status: str = "online"
+    logs: list[str] = []
 
 
 class JobResultRequest(BaseModel):
@@ -135,6 +136,8 @@ def node_heartbeat(node_id: str, req: NodeHeartbeatRequest):
         raise HTTPException(status_code=404, detail=f"Node '{node_id}' not registered")
     node = registry.get_node(node_id)
     if node:
+        if req.logs:
+            node.append_logs(req.logs)
         manager.send_node_update(node.to_dict())
     return {"status": "ok"}
 
@@ -150,6 +153,15 @@ def unregister_node(node_id: str):
 def list_nodes():
     """List all registered nodes."""
     return [n.to_dict() for n in registry.list_nodes()]
+
+
+@router.get("/{node_id}/logs")
+def get_node_logs(node_id: str):
+    """Get recent log lines from a node."""
+    node = registry.get_node(node_id)
+    if not node:
+        raise HTTPException(status_code=404, detail=f"Node '{node_id}' not found")
+    return {"logs": node.recent_logs}
 
 
 # --- Pause / Schedule ---

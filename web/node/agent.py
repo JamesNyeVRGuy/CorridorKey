@@ -21,6 +21,7 @@ from device_utils import check_gpu_available, enumerate_gpus
 
 from . import config
 from .file_transfer import FileTransfer
+from .log_buffer import buffer as log_buffer
 from .weight_sync import sync_weights
 
 logger = logging.getLogger(__name__)
@@ -138,10 +139,11 @@ class NodeAgent:
         try:
             gpu_ready = self._check_gpu_ready()
             status = "online" if gpu_ready else "busy"
+            new_logs = log_buffer.get_new_lines()
             r = self._api(
                 "post",
                 f"/api/nodes/{self.node_id}/heartbeat",
-                json={"vram_free_gb": 0, "status": status},
+                json={"vram_free_gb": 0, "status": status, "logs": new_logs},
             )
             if r.status_code == 404:
                 # Server restarted and lost our registration — re-register
