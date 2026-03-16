@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import platform
-import uuid
 
 # Try loading .env from the working directory
 try:
@@ -21,7 +21,8 @@ def _get(key: str, default: str = "") -> str:
 
 MAIN_URL: str = _get("CK_MAIN_URL", "http://localhost:3000")
 NODE_NAME: str = _get("CK_NODE_NAME", platform.node() or "unnamed-node")
-NODE_ID: str = _get("CK_NODE_ID", uuid.uuid4().hex[:12])
+# Stable ID derived from node name — same name always gets the same ID
+NODE_ID: str = _get("CK_NODE_ID", hashlib.sha256(NODE_NAME.encode()).hexdigest()[:12])
 NODE_GPUS: str = _get("CK_NODE_GPUS", "auto")  # "auto" | "0" | "0,1"
 SHARED_STORAGE: str = _get("CK_SHARED_STORAGE", "")  # empty = HTTP transfer
 POLL_INTERVAL: float = float(_get("CK_POLL_INTERVAL", "2"))

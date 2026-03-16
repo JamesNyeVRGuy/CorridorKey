@@ -30,3 +30,12 @@ services:
       # Mount shared projects directory if using shared storage.
       # Leave CK_SHARED_STORAGE empty to use HTTP file transfer instead.
       - ${CK_PROJECTS_DIR:-./Projects}:/app/Projects
+      # Persist downloaded weights across container restarts
+      - node-weights:/app/CorridorKeyModule/checkpoints
+      - node-weights-gvm:/app/gvm_core/weights
+      - node-weights-vm:/app/VideoMaMaInferenceModule/checkpoints/VideoMaMa
+
+volumes:
+  node-weights:
+  node-weights-gvm:
+  node-weights-vm:
