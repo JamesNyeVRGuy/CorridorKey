@@ -33,6 +33,13 @@ export interface NodeInfo {
 	paused: boolean;
 	schedule: NodeSchedule;
 	accepted_types: string[];
+	cpu_stats: {
+		cpu_percent: number;
+		cpu_count: number;
+		ram_total_gb: number;
+		ram_used_gb: number;
+		ram_free_gb: number;
+	} | null;
 }
 
 export const nodes = writable<NodeInfo[]>([]);

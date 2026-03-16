@@ -85,6 +85,7 @@ class NodeInfo:
     schedule: NodeSchedule = field(default_factory=NodeSchedule)
     # Empty list = accept all job types. Non-empty = only these types.
     accepted_types: list[str] = field(default_factory=list)
+    cpu_stats: dict = field(default_factory=dict)  # {cpu_percent, cpu_count, ram_*}
     recent_logs: list[str] = field(default_factory=list, repr=False)
 
     def append_logs(self, lines: list[str], max_lines: int = 200) -> None:
@@ -134,6 +135,7 @@ class NodeInfo:
             "paused": self.paused,
             "schedule": self.schedule.to_dict(),
             "accepted_types": self.accepted_types,
+            "cpu_stats": self.cpu_stats,
         }
 
 

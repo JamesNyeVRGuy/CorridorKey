@@ -245,6 +245,11 @@ export const api = {
 				'GET',
 				'/api/system/gpus'
 			),
+		localCpu: () =>
+			request<{ cpu_percent: number; cpu_count: number; ram_total_gb: number; ram_used_gb: number; ram_free_gb: number }>(
+				'GET',
+				'/api/system/cpu'
+			),
 		getLocalGpu: () => request<{ enabled: boolean }>('GET', '/api/system/local-gpu'),
 		setLocalGpu: (enabled: boolean) =>
 			request<unknown>('POST', `/api/system/local-gpu?enabled=${enabled}`)
