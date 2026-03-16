@@ -213,6 +213,10 @@ class NodeAgent:
             clips_dir = str(Path(job_data.get("shared_clip_root", "")).parent)
         else:
             clips_dir = self._download_job_files(job_data)
+            # Downloaded files ARE the frame range — strip it so inference
+            # processes all local files instead of re-indexing into the subset
+            if job_data.get("params", {}).get("frame_range"):
+                job_data = {**job_data, "params": {**job_data["params"], "frame_range": None}}
 
         if len(self._gpu_indices) == 1:
             self._run_single_gpu(job_data, clips_dir)
@@ -221,7 +225,7 @@ class NodeAgent:
 
         # Upload results and clean up temp directory
         if not use_shared and clips_dir:
-            self._upload_results(clip_name, clips_dir)
+            self._upload_results(clip_name, clips_dir, job_type=job_data.get("job_type", ""))
             self._cleanup_temp(clips_dir)
 
     def _download_job_files(self, job_data: dict) -> str:
@@ -248,17 +252,20 @@ class NodeAgent:
 
         return base_dir
 
-    def _upload_results(self, clip_name: str, clips_dir: str) -> None:
+    def _upload_results(self, clip_name: str, clips_dir: str, job_type: str = "") -> None:
         """Upload output files back to the main machine."""
         clip_dir = os.path.join(clips_dir, clip_name)
 
+        # Inference outputs
         output_map = {
             "fg": os.path.join(clip_dir, "Output", "FG"),
             "matte": os.path.join(clip_dir, "Output", "Matte"),
             "comp": os.path.join(clip_dir, "Output", "Comp"),
             "processed": os.path.join(clip_dir, "Output", "Processed"),
-            "alpha": os.path.join(clip_dir, "AlphaHint"),
         }
+        # Only upload alpha hints for jobs that generate them (GVM/VideoMaMa)
+        if job_type in ("gvm_alpha", "videomama_alpha"):
+            output_map["alpha"] = os.path.join(clip_dir, "AlphaHint")
 
         for pass_name, dir_path in output_map.items():
             if os.path.isdir(dir_path):
