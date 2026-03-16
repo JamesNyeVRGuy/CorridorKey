@@ -261,6 +261,9 @@ def _run_job(service: CorridorKeyService, job: GPUJob, queue: GPUJobQueue, clips
     except JobCancelledError:
         queue.mark_cancelled(job)
         manager.send_job_status(job.id, JobStatus.CANCELLED.value)
+        from .app import _save_history_snapshot
+
+        _save_history_snapshot(queue)
     except Exception as e:
         error_msg = str(e)
         logger.exception(f"Job {job.id} failed: {error_msg}")

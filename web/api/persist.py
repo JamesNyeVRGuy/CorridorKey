@@ -74,3 +74,14 @@ def load_all() -> dict[str, Any]:
     """Load the entire state file."""
     with _lock:
         return _read()
+
+
+def save_job_history(history: list[dict[str, Any]]) -> None:
+    """Save job history (completed/failed/cancelled jobs)."""
+    # Cap at 200 entries to keep the file manageable
+    save_key("job_history", history[-200:])
+
+
+def load_job_history() -> list[dict[str, Any]]:
+    """Load persisted job history."""
+    return load_key("job_history", [])

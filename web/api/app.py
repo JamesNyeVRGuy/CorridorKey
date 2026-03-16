@@ -11,6 +11,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from backend.job_queue import GPUJob, JobStatus, JobType
 from backend.project import projects_root
 
 from . import persist
@@ -21,6 +22,27 @@ from .worker import start_worker
 from .ws import manager, websocket_endpoint
 
 logger = logging.getLogger(__name__)
+
+
+def _save_history_snapshot(queue) -> None:
+    """Serialize and persist the job history."""
+    history = queue.history_snapshot
+    persist.save_job_history(
+        [
+            {
+                "id": j.id,
+                "job_type": j.job_type.value,
+                "clip_name": j.clip_name,
+                "status": j.status.value,
+                "error_message": j.error_message,
+                "claimed_by": j.claimed_by,
+                "current_frame": j.current_frame,
+                "total_frames": j.total_frames,
+            }
+            for j in history
+        ]
+    )
+
 
 # Resolve clips directory from env or default to Projects/
 CLIPS_DIR = os.environ.get("CK_CLIPS_DIR", "")
@@ -55,6 +77,35 @@ async def lifespan(app: FastAPI):
     manager.set_loop(loop)
 
     queue = get_queue()
+
+    # Restore job history from disk
+    saved_history = persist.load_job_history()
+    if saved_history:
+        for jd in saved_history:
+            job = GPUJob(
+                job_type=JobType(jd["job_type"]),
+                clip_name=jd["clip_name"],
+                params=jd.get("params", {}),
+            )
+            job.id = jd["id"]
+            job.status = JobStatus(jd["status"])
+            job.error_message = jd.get("error_message")
+            job.claimed_by = jd.get("claimed_by")
+            job.current_frame = jd.get("current_frame", 0)
+            job.total_frames = jd.get("total_frames", 0)
+            queue._history.append(job)
+        logger.info(f"Restored {len(saved_history)} jobs from history")
+
+    # Save history whenever a job finishes
+    def _persist_history(_clip_name: str) -> None:
+        _save_history_snapshot(queue)
+
+    def _persist_history_err(_clip_name: str, _error: str) -> None:
+        _save_history_snapshot(queue)
+
+    queue.on_completion = _persist_history
+    queue.on_error = _persist_history_err
+
     worker_thread, stop_event = start_worker(service, queue, clips_dir)
     reaper_thread = start_reaper(queue, stop_event)
 
