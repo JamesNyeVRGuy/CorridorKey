@@ -597,12 +597,13 @@
 
 	.pass-tabs {
 		display: flex;
-		gap: 2px;
+		gap: 4px;
 		flex-wrap: wrap;
 	}
 
 	.pass-tab {
-		padding: 3px 8px;
+		padding: 6px 10px;
+		min-height: 28px;
 		font-size: 10px;
 		font-weight: 500;
 		border: 1px solid var(--border);
@@ -631,7 +632,8 @@
 	}
 
 	.mode-btn {
-		padding: 3px 10px;
+		padding: 6px 10px;
+		min-height: 28px;
 		font-size: 10px;
 		font-weight: 500;
 		border: none;
