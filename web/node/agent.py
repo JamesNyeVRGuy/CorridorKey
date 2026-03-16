@@ -17,7 +17,7 @@ from pathlib import Path
 
 import httpx
 
-from device_utils import check_gpu_available, enumerate_gpus
+from device_utils import check_gpu_available, enumerate_gpus, get_cpu_stats
 
 from . import config
 from .file_transfer import FileTransfer
@@ -140,10 +140,16 @@ class NodeAgent:
             gpu_ready = self._check_gpu_ready()
             status = "online" if gpu_ready else "busy"
             new_logs = log_buffer.get_new_lines()
+            cpu = get_cpu_stats()
             r = self._api(
                 "post",
                 f"/api/nodes/{self.node_id}/heartbeat",
-                json={"vram_free_gb": 0, "status": status, "logs": new_logs},
+                json={
+                    "vram_free_gb": 0,
+                    "status": status,
+                    "logs": new_logs,
+                    "cpu_stats": cpu.to_dict(),
+                },
             )
             if r.status_code == 404:
                 # Server restarted and lost our registration — re-register

@@ -76,6 +76,14 @@ def get_gpus():
     ]
 
 
+@router.get("/cpu")
+def get_cpu():
+    """Get CPU usage and memory stats for this machine."""
+    from device_utils import get_cpu_stats
+
+    return get_cpu_stats().to_dict()
+
+
 @router.get("/device", response_model=DeviceResponse)
 def get_device():
     service = get_service()

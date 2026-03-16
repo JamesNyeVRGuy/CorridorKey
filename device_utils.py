@@ -132,6 +132,41 @@ def enumerate_gpus() -> list[GPUInfo]:
     return gpus
 
 
+@dataclass
+class CPUStats:
+    """System CPU and memory statistics."""
+
+    cpu_percent: float  # overall CPU usage 0-100
+    cpu_count: int
+    ram_total_gb: float
+    ram_used_gb: float
+    ram_free_gb: float
+
+    def to_dict(self) -> dict:
+        return {
+            "cpu_percent": round(self.cpu_percent, 1),
+            "cpu_count": self.cpu_count,
+            "ram_total_gb": round(self.ram_total_gb, 1),
+            "ram_used_gb": round(self.ram_used_gb, 1),
+            "ram_free_gb": round(self.ram_free_gb, 1),
+        }
+
+
+def get_cpu_stats() -> CPUStats:
+    """Get current CPU usage and memory stats."""
+    import psutil
+
+    cpu_pct = psutil.cpu_percent(interval=0)
+    mem = psutil.virtual_memory()
+    return CPUStats(
+        cpu_percent=cpu_pct,
+        cpu_count=psutil.cpu_count() or 1,
+        ram_total_gb=mem.total / (1024**3),
+        ram_used_gb=mem.used / (1024**3),
+        ram_free_gb=mem.available / (1024**3),
+    )
+
+
 def check_gpu_available(gpu_index: int = 0, min_free_gb: float = 0.0) -> tuple[bool, str]:
     """Check if a GPU is available for CorridorKey work.
 

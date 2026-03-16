@@ -12,6 +12,7 @@
 	}
 
 	let localGpus = $state<LocalGPU[]>([]);
+	let localCpu = $state<{ cpu_percent: number; cpu_count: number; ram_total_gb: number; ram_used_gb: number; ram_free_gb: number } | null>(null);
 	let localGpuEnabled = $state(true);
 	let editingSchedule = $state<string | null>(null);
 	let scheduleStart = $state('20:00');
@@ -21,11 +22,11 @@
 	let selectedTypes = $state<Set<string>>(new Set());
 
 	const ALL_JOB_TYPES = [
-		{ value: 'inference', label: 'Inference' },
-		{ value: 'gvm_alpha', label: 'GVM Alpha' },
-		{ value: 'videomama_alpha', label: 'VideoMaMa' },
-		{ value: 'video_extract', label: 'Extract' },
-		{ value: 'video_stitch', label: 'Stitch' }
+		{ value: 'inference', label: 'Inference', kind: 'gpu' },
+		{ value: 'gvm_alpha', label: 'GVM Alpha', kind: 'gpu' },
+		{ value: 'videomama_alpha', label: 'VideoMaMa', kind: 'gpu' },
+		{ value: 'video_extract', label: 'Extract', kind: 'cpu' },
+		{ value: 'video_stitch', label: 'Stitch', kind: 'cpu' }
 	];
 	let viewingLogs = $state<string | null>(null);
 	let logLines = $state<string[]>([]);
@@ -34,8 +35,12 @@
 		refreshNodes();
 		api.system2.localGpus().then((gpus) => (localGpus = gpus)).catch(() => {});
 		api.system2.getLocalGpu().then((r) => (localGpuEnabled = r.enabled)).catch(() => {});
+		api.system2.localCpu().then((c) => (localCpu = c)).catch(() => {});
 		const interval = setInterval(refreshNodes, 5000);
-		return () => clearInterval(interval);
+		const cpuInterval = setInterval(() => {
+			api.system2.localCpu().then((c) => (localCpu = c)).catch(() => {});
+		}, 5000);
+		return () => { clearInterval(interval); clearInterval(cpuInterval); };
 	});
 
 	function timeSince(ts: number): string {
@@ -216,6 +221,25 @@
 					{/each}
 				</div>
 			{/if}
+			{#if localCpu}
+				<div class="cpu-stats-row">
+					<span class="cpu-label mono">CPU</span>
+					<span class="cpu-detail mono">{localCpu.cpu_count} cores</span>
+					<div class="cpu-bar-wrap">
+						<div class="vram-bar small">
+							<div class="vram-used cpu-fill" style="width: {localCpu.cpu_percent}%"></div>
+						</div>
+						<span class="vram-label mono">{localCpu.cpu_percent}%</span>
+					</div>
+					<span class="cpu-label mono">RAM</span>
+					<div class="cpu-bar-wrap">
+						<div class="vram-bar small">
+							<div class="vram-used" style="width: {localCpu.ram_total_gb > 0 ? (localCpu.ram_used_gb / localCpu.ram_total_gb) * 100 : 0}%"></div>
+						</div>
+						<span class="vram-label mono">{localCpu.ram_free_gb.toFixed(1)} / {localCpu.ram_total_gb.toFixed(1)} GB</span>
+					</div>
+				</div>
+			{/if}
 		</div>
 	</section>
 
@@ -374,7 +398,7 @@
 								<p class="types-hint mono">Select which job types this node accepts. None selected = all types.</p>
 								<div class="types-grid">
 									{#each ALL_JOB_TYPES as jt}
-										<label class="type-chip" class:selected={selectedTypes.has(jt.value)}>
+										<label class="type-chip {jt.kind}" class:selected={selectedTypes.has(jt.value)}>
 											<input
 												type="checkbox"
 												checked={selectedTypes.has(jt.value)}
@@ -430,6 +454,25 @@
 								<span class="vram-label mono"
 									>{node.vram_free_gb.toFixed(1)} / {node.vram_total_gb.toFixed(1)} GB</span
 								>
+							</div>
+						{/if}
+
+						{#if node.cpu_stats}
+							<div class="cpu-stats-row node-cpu">
+								<span class="cpu-label mono">CPU</span>
+								<div class="cpu-bar-wrap">
+									<div class="vram-bar small">
+										<div class="vram-used cpu-fill" style="width: {node.cpu_stats.cpu_percent}%"></div>
+									</div>
+									<span class="vram-label mono">{node.cpu_stats.cpu_percent}%</span>
+								</div>
+								<span class="cpu-label mono">RAM</span>
+								<div class="cpu-bar-wrap">
+									<div class="vram-bar small">
+										<div class="vram-used" style="width: {node.cpu_stats.ram_total_gb > 0 ? (node.cpu_stats.ram_used_gb / node.cpu_stats.ram_total_gb) * 100 : 0}%"></div>
+									</div>
+									<span class="vram-label mono">{node.cpu_stats.ram_free_gb.toFixed(1)}G</span>
+								</div>
 							</div>
 						{/if}
 
@@ -985,14 +1028,74 @@
 		border-color: var(--text-tertiary);
 	}
 
-	.type-chip.selected {
+	.type-chip.selected.gpu {
 		border-color: var(--accent);
 		color: var(--accent);
 		background: var(--accent-muted);
 	}
 
+	.type-chip.selected.cpu {
+		border-color: var(--secondary);
+		color: var(--secondary);
+		background: var(--secondary-muted);
+	}
+
+	.type-chip.gpu::before {
+		content: '';
+		width: 6px;
+		height: 6px;
+		border-radius: 50%;
+		background: var(--accent-dim);
+		flex-shrink: 0;
+	}
+
+	.type-chip.cpu::before {
+		content: '';
+		width: 6px;
+		height: 6px;
+		border-radius: 50%;
+		background: var(--secondary);
+		flex-shrink: 0;
+		opacity: 0.6;
+	}
+
 	.type-chip input {
 		display: none;
+	}
+
+	.cpu-stats-row {
+		display: flex;
+		align-items: center;
+		gap: var(--sp-2);
+		font-size: 11px;
+		padding-top: var(--sp-2);
+		border-top: 1px solid var(--border-subtle);
+		margin-top: var(--sp-2);
+	}
+
+	.cpu-stats-row.node-cpu {
+		padding-left: 18px;
+	}
+
+	.cpu-label {
+		font-size: 10px;
+		color: var(--text-tertiary);
+		font-weight: 600;
+	}
+
+	.cpu-detail {
+		font-size: 10px;
+		color: var(--text-tertiary);
+	}
+
+	.cpu-bar-wrap {
+		display: flex;
+		align-items: center;
+		gap: 4px;
+	}
+
+	.cpu-fill {
+		background: var(--secondary) !important;
 	}
 
 	.btn-icon.active {

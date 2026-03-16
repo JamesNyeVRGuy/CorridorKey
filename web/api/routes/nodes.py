@@ -90,6 +90,7 @@ class NodeHeartbeatRequest(BaseModel):
     vram_free_gb: float = 0.0
     status: str = "online"
     logs: list[str] = []
+    cpu_stats: dict = {}
 
 
 class JobResultRequest(BaseModel):
@@ -138,6 +139,8 @@ def node_heartbeat(node_id: str, req: NodeHeartbeatRequest):
     if node:
         if req.logs:
             node.append_logs(req.logs)
+        if req.cpu_stats:
+            node.cpu_stats = req.cpu_stats
         manager.send_node_update(node.to_dict())
     return {"status": "ok"}
 
