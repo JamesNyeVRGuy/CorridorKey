@@ -44,8 +44,14 @@ class FileTransfer:
             data = r.json()
             return data.get("directory"), data.get("files", [])
 
-    def download_pass(self, clip_name: str, pass_name: str, clip_dir: str) -> int:
-        """Download all files for a clip pass into the correct subdirectory.
+    def download_pass(
+        self,
+        clip_name: str,
+        pass_name: str,
+        clip_dir: str,
+        frame_range: tuple[int, int] | None = None,
+    ) -> int:
+        """Download files for a clip pass into the correct subdirectory.
 
         Uses the server's reported directory name so the local layout
         matches what clip_state scanning expects. Acquires the transfer
@@ -55,12 +61,18 @@ class FileTransfer:
             clip_name: Name of the clip.
             pass_name: Pass type ("input", "alpha", "mask", "source").
             clip_dir: Local clip root directory (files go into a subdirectory).
+            frame_range: Optional (start, end) to only download frames in range.
 
         Returns the number of files downloaded.
         """
         directory, files = self.list_files(clip_name, pass_name)
         if not files or not directory:
             return 0
+
+        # Filter to frame range if specified (files are naturally sorted)
+        if frame_range is not None:
+            start, end = frame_range
+            files = files[start:end]
 
         dest_dir = os.path.join(clip_dir, directory)
         os.makedirs(dest_dir, exist_ok=True)

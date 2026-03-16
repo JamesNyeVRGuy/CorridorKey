@@ -228,14 +228,18 @@ class NodeAgent:
         """Download input files for a job. Returns the clips_dir path."""
         clip_name = job_data["clip_name"]
         job_type = job_data["job_type"]
+        params = job_data.get("params", {})
+
+        # Only download frames within the shard's range
+        frame_range = params.get("frame_range")
+        fr = tuple(frame_range) if frame_range else None
 
         base_dir = tempfile.mkdtemp(prefix=f"ck-node-{clip_name}-")
         clip_dir = os.path.join(base_dir, clip_name)
 
         if job_type == "inference":
-            # Need input frames and alpha hints
-            self.file_transfer.download_pass(clip_name, "input", clip_dir)
-            self.file_transfer.download_pass(clip_name, "alpha", clip_dir)
+            self.file_transfer.download_pass(clip_name, "input", clip_dir, frame_range=fr)
+            self.file_transfer.download_pass(clip_name, "alpha", clip_dir, frame_range=fr)
         elif job_type == "gvm_alpha":
             self.file_transfer.download_pass(clip_name, "input", clip_dir)
         elif job_type == "videomama_alpha":
