@@ -19,7 +19,7 @@ from backend.project import (
 )
 
 from ..deps import get_queue, get_service
-from ..routes.clips import _clip_to_schema, _clips_dir
+from ..routes import clips as _clips_mod
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/upload", tags=["upload"])
@@ -63,7 +63,7 @@ async def upload_video(file: UploadFile, name: str | None = None, auto_extract: 
 
     # Scan the new clips
     service = get_service()
-    clips = service.scan_clips(_clips_dir)
+    clips = service.scan_clips(_clips_mod._clips_dir)
     new_clips = [c for c in clips if c.root_path.startswith(project_dir)]
 
     # Auto-submit extraction jobs for any clip with a video source
@@ -86,7 +86,7 @@ async def upload_video(file: UploadFile, name: str | None = None, auto_extract: 
     return {
         "status": "ok",
         "project_dir": project_dir,
-        "clips": [_clip_to_schema(c) for c in new_clips],
+        "clips": [_clips_mod._clip_to_schema(c) for c in new_clips],
         "extract_jobs": extract_jobs,
     }
 
@@ -168,13 +168,13 @@ async def upload_frames(file: UploadFile, name: str | None = None):
         )
 
     service = get_service()
-    clips = service.scan_clips(_clips_dir)
+    clips = service.scan_clips(_clips_mod._clips_dir)
     new_clips = [c for c in clips if c.root_path.startswith(project_dir)]
 
     return {
         "status": "ok",
         "project_dir": project_dir,
-        "clips": [_clip_to_schema(c) for c in new_clips],
+        "clips": [_clips_mod._clip_to_schema(c) for c in new_clips],
         "frame_count": len(image_files),
     }
 
@@ -193,7 +193,7 @@ async def upload_alpha_hint(clip_name: str, file: UploadFile):
         raise HTTPException(status_code=400, detail="Expected a .zip file containing alpha hint frames")
 
     service = get_service()
-    clips = service.scan_clips(_clips_dir)
+    clips = service.scan_clips(_clips_mod._clips_dir)
     clip = next((c for c in clips if c.name == clip_name), None)
     if clip is None:
         raise HTTPException(status_code=404, detail=f"Clip '{clip_name}' not found")
@@ -232,12 +232,12 @@ async def upload_alpha_hint(clip_name: str, file: UploadFile):
             dst = os.path.join(alpha_dir, fname)
             shutil.copy2(src, dst)
 
-    clips = service.scan_clips(_clips_dir)
+    clips = service.scan_clips(_clips_mod._clips_dir)
     updated = next((c for c in clips if c.name == clip_name), None)
 
     return {
         "status": "ok",
-        "clip": _clip_to_schema(updated) if updated else None,
+        "clip": _clips_mod._clip_to_schema(updated) if updated else None,
         "alpha_frames": len(image_files),
     }
 
@@ -256,7 +256,7 @@ async def upload_videomama_mask(clip_name: str, file: UploadFile):
         raise HTTPException(status_code=400, detail="Expected a .zip file containing mask frames")
 
     service = get_service()
-    clips = service.scan_clips(_clips_dir)
+    clips = service.scan_clips(_clips_mod._clips_dir)
     clip = next((c for c in clips if c.name == clip_name), None)
     if clip is None:
         raise HTTPException(status_code=404, detail=f"Clip '{clip_name}' not found")
@@ -295,11 +295,11 @@ async def upload_videomama_mask(clip_name: str, file: UploadFile):
             dst = os.path.join(mask_dir, fname)
             shutil.copy2(src, dst)
 
-    clips = service.scan_clips(_clips_dir)
+    clips = service.scan_clips(_clips_mod._clips_dir)
     updated = next((c for c in clips if c.name == clip_name), None)
 
     return {
         "status": "ok",
-        "clip": _clip_to_schema(updated) if updated else None,
+        "clip": _clips_mod._clip_to_schema(updated) if updated else None,
         "mask_frames": len(image_files),
     }
