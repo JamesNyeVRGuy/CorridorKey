@@ -17,6 +17,7 @@ from backend.natural_sort import natsorted
 from ..database import get_storage
 from ..deps import get_queue, get_service
 from ..nodes import GPUSlot, NodeInfo, NodeSchedule, registry
+from ..path_security import safe_join
 from ..routes import clips as _clips_mod
 from ..ws import manager
 
@@ -394,7 +395,7 @@ def download_clip_file(node_id: str, clip_name: str, pass_name: str, filename: s
         raise HTTPException(status_code=404, detail=f"Clip '{clip_name}' not found")
 
     for d in dirs:
-        fpath = os.path.join(clip.root_path, d, filename)
+        fpath = safe_join(clip.root_path, d, filename)
         if os.path.isfile(fpath):
             return FileResponse(fpath)
 
@@ -494,7 +495,7 @@ async def upload_result_file(node_id: str, clip_name: str, pass_name: str, filen
     target_dir = os.path.join(clip.root_path, subdir)
     os.makedirs(target_dir, exist_ok=True)
 
-    fpath = os.path.join(target_dir, filename)
+    fpath = safe_join(target_dir, filename)
     try:
         with open(fpath, "wb") as f:
             while chunk := await file.read(8 * 1024 * 1024):
