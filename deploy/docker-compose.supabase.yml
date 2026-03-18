@@ -41,7 +41,7 @@ services:
       GOTRUE_DB_DATABASE_URL: postgres://supabase_auth_admin:${POSTGRES_PASSWORD}@supabase-db:5432/${POSTGRES_DB:-corridorkey}
       GOTRUE_SITE_URL: ${SITE_URL:-http://localhost:3000}
       GOTRUE_URI_ALLOW_LIST: ${ADDITIONAL_REDIRECT_URLS:-}
-      GOTRUE_DISABLE_SIGNUP: ${DISABLE_SIGNUP:-false}
+      GOTRUE_DISABLE_SIGNUP: ${DISABLE_SIGNUP:-true}
       GOTRUE_JWT_ADMIN_ROLES: service_role
       GOTRUE_JWT_AUD: authenticated
       GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated

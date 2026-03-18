@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
-	import { signup } from '$lib/auth';
 
 	let email = $state('');
 	let password = $state('');
@@ -49,14 +48,15 @@
 		loading = true;
 		error = '';
 		try {
-			// Create the user in GoTrue
-			await signup(email, password);
-
-			// Mark the invite token as consumed
-			const consumeRes = await fetch(`/api/auth/invite/consume?token=${encodeURIComponent(inviteToken)}&email=${encodeURIComponent(email)}`, { method: 'POST' });
-			if (!consumeRes.ok) {
-				const data = await consumeRes.json().catch(() => ({ detail: 'Failed to consume invite' }));
-				error = data.detail ?? 'Invite token could not be consumed';
+			// Server-side signup: validates invite, creates GoTrue user, consumes invite
+			const res = await fetch('/api/auth/signup', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ email, password, name, invite_token: inviteToken })
+			});
+			if (!res.ok) {
+				const data = await res.json().catch(() => ({ detail: 'Signup failed' }));
+				error = data.detail ?? 'Signup failed';
 				return;
 			}
 

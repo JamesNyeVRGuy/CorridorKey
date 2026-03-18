@@ -9,6 +9,7 @@ shares via Discord/DM. Users sign up at /signup?invite=TOKEN.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import secrets
@@ -117,6 +118,101 @@ def consume_invite_token(token: str, email: str):
     user_store.record_signup(user_id=email, email=email)
 
     return {"status": "consumed"}
+
+
+@router.post("/signup")
+def signup_with_invite(req: SignupRequest):
+    """Server-side signup: validate invite, create GoTrue user, consume invite.
+
+    This replaces the frontend's direct GoTrue signup call so that
+    GOTRUE_DISABLE_SIGNUP=true can be enforced. The server uses the
+    GoTrue admin API (service role key) to create the user.
+    """
+    if not AUTH_ENABLED:
+        raise HTTPException(status_code=400, detail="Auth is not enabled")
+    if not req.email or not req.password:
+        raise HTTPException(status_code=400, detail="Email and password required")
+    if not req.invite_token:
+        raise HTTPException(status_code=400, detail="Invite token required")
+
+    # Validate invite
+    storage = get_storage()
+    invites = storage.get_invite_tokens()
+    invite = invites.get(req.invite_token)
+    if not invite:
+        raise HTTPException(status_code=404, detail="Invalid invite token")
+    if invite.get("used"):
+        raise HTTPException(status_code=409, detail="Invite token already used")
+
+    # Create user via GoTrue admin API
+    gotrue_url = os.environ.get("CK_GOTRUE_URL", "http://localhost:54324")
+    service_key = os.environ.get("CK_SUPABASE_SERVICE_KEY", "")
+
+    if service_key:
+        # Use admin API (bypasses DISABLE_SIGNUP)
+        import urllib.request
+
+        admin_body = json.dumps({
+            "email": req.email,
+            "password": req.password,
+            "email_confirm": True,
+            "app_metadata": {"tier": "pending"},
+            "user_metadata": {"name": req.name},
+        }).encode()
+        admin_req = urllib.request.Request(
+            f"{gotrue_url}/admin/users",
+            data=admin_body,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {service_key}",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(admin_req, timeout=10) as resp:
+                user_data = json.loads(resp.read())
+                user_id = user_data.get("id", req.email)
+        except Exception as e:
+            error_detail = str(e)
+            try:
+                error_detail = e.read().decode() if hasattr(e, "read") else str(e)
+            except Exception:
+                pass
+            raise HTTPException(status_code=502, detail=f"Failed to create user in GoTrue: {error_detail}") from e
+    else:
+        # Fallback: direct signup (only works if DISABLE_SIGNUP=false)
+        import urllib.request
+
+        signup_body = json.dumps({"email": req.email, "password": req.password}).encode()
+        signup_req = urllib.request.Request(
+            f"{gotrue_url}/signup",
+            data=signup_body,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(signup_req, timeout=10) as resp:
+                user_data = json.loads(resp.read())
+                user_id = user_data.get("user", {}).get("id", req.email)
+        except Exception as e:
+            error_detail = str(e)
+            try:
+                error_detail = e.read().decode() if hasattr(e, "read") else str(e)
+            except Exception:
+                pass
+            raise HTTPException(status_code=502, detail=f"Signup failed: {error_detail}") from e
+
+    # Consume invite
+    invite["used"] = True
+    invite["used_by"] = req.email
+    invite["used_at"] = time.time()
+    storage.save_invite_token(req.invite_token, invite)
+
+    # Record for approval workflow
+    user_store = get_user_store()
+    user_store.record_signup(user_id=user_id, email=req.email, name=req.name)
+
+    return {"status": "created", "user_id": user_id}
 
 
 @router.get("/invites", dependencies=[Depends(require_admin)])
