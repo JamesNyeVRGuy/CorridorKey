@@ -39,6 +39,34 @@ if [ -n "$SERVICE_ROLE_KEY" ]; then
     echo ""
     echo "Change your password after first login!"
     exit 0
+  elif echo "$RESPONSE" | grep -q "email_exists"; then
+    echo "User already exists — updating tier via admin API..."
+    # Get user ID by listing users
+    USER_ID=$(curl -s "http://localhost:${GOTRUE_PORT}/admin/users" \
+      -H "Authorization: Bearer ${SERVICE_ROLE_KEY}" \
+      | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+users = data.get('users', data) if isinstance(data, dict) else data
+for u in users:
+    if u.get('email') == '${EMAIL}':
+        print(u['id'])
+        break
+" 2>/dev/null)
+    if [ -n "$USER_ID" ]; then
+      curl -s -X PUT "http://localhost:${GOTRUE_PORT}/admin/users/${USER_ID}" \
+        -H "Content-Type: application/json" \
+        -H "Authorization: Bearer ${SERVICE_ROLE_KEY}" \
+        -d "{\"app_metadata\":{\"tier\":\"platform_admin\"}}" > /dev/null
+      echo "Updated user $USER_ID to platform_admin"
+      echo ""
+      echo "Admin user ready:"
+      echo "  Email:    $EMAIL"
+      echo "  Tier:     platform_admin"
+      echo ""
+      exit 0
+    fi
+    echo "Could not find user ID — falling back to SQL..."
   else
     echo "Admin API failed: $RESPONSE"
     echo "Falling back to signup + SQL..."

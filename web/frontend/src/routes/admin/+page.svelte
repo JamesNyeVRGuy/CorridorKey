@@ -30,6 +30,8 @@
 	let orgs = $state<OrgRecord[]>([]);
 	let loading = $state(true);
 	let actionInProgress = $state<string | null>(null);
+	let inviteUrl = $state('');
+	let inviteGenerating = $state(false);
 
 	async function adminFetch(path: string, opts?: RequestInit) {
 		const token = localStorage.getItem('ck:auth_token');
@@ -47,6 +49,21 @@
 		]);
 		users = allRes.users;
 		pendingUsers = pendingRes.users;
+	}
+
+	async function generateInvite() {
+		inviteGenerating = true;
+		inviteUrl = '';
+		try {
+			const res = await adminFetch('/api/auth/invite/generate', { method: 'POST' });
+			inviteUrl = `${window.location.origin}${res.signup_url}`;
+		} finally {
+			inviteGenerating = false;
+		}
+	}
+
+	async function copyInvite() {
+		await navigator.clipboard.writeText(inviteUrl);
 	}
 
 	async function loadOrgs() {
@@ -145,6 +162,22 @@
 		</div>
 
 		{#if activeTab === 'users'}
+			<!-- Invite Generation -->
+			<div class="section">
+				<h2 class="section-title mono">INVITE LINK</h2>
+				<div class="invite-row">
+					<button class="btn btn-primary mono" onclick={generateInvite} disabled={inviteGenerating}>
+						{inviteGenerating ? 'Generating...' : 'Generate Invite Link'}
+					</button>
+					{#if inviteUrl}
+						<div class="invite-result">
+							<input type="text" class="invite-url mono" value={inviteUrl} readonly />
+							<button class="btn btn-copy mono" onclick={copyInvite}>COPY</button>
+						</div>
+					{/if}
+				</div>
+			</div>
+
 			<!-- Pending Approvals -->
 			{#if pendingUsers.length > 0}
 				<div class="section">
@@ -446,6 +479,43 @@
 	.btn-reject:hover:not(:disabled) {
 		background: rgba(255, 82, 82, 0.1);
 	}
+
+	.btn-primary {
+		background: var(--accent);
+		color: #000;
+		font-weight: 600;
+	}
+	.btn-primary:hover:not(:disabled) { background: #fff; }
+
+	.btn-copy {
+		color: var(--accent);
+		border-color: var(--accent-dim);
+	}
+	.btn-copy:hover:not(:disabled) { background: var(--accent-muted); }
+
+	.invite-row {
+		display: flex;
+		flex-direction: column;
+		gap: var(--sp-3);
+	}
+
+	.invite-result {
+		display: flex;
+		gap: var(--sp-2);
+		align-items: center;
+	}
+
+	.invite-url {
+		flex: 1;
+		padding: 8px 12px;
+		background: var(--surface-3);
+		border: 1px solid var(--border);
+		border-radius: var(--radius-sm);
+		color: var(--text-primary);
+		font-size: 12px;
+		outline: none;
+	}
+	.invite-url:focus { border-color: var(--accent); }
 
 	/* Data table */
 	.table-wrap {

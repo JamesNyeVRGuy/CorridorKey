@@ -181,14 +181,29 @@ class AuthMiddleware(BaseHTTPMiddleware):
             raw_claims=claims,
         )
 
-        # Link email-based signup record to real UUID on first auth (CRKY-61)
+        # Auto-register user in local store on first auth.
+        # Handles users created via create-admin.sh or GoTrue admin API
+        # who don't have a local record yet.
         if user_id and email:
             try:
                 from .users import get_user_store
 
                 store = get_user_store()
+                # Link email-based signup record to real UUID (CRKY-61)
                 if store.get_user(email) and not store.get_user(user_id):
                     store.link_uuid(email, user_id)
+                # Auto-register if not in local store at all
+                if not store.get_user(user_id):
+                    tier = app_metadata.get("tier", "pending")
+                    store.record_signup(user_id=user_id, email=email)
+                    # If they already have a tier from GoTrue, apply it locally
+                    if tier != "pending":
+                        store.set_tier(user_id, tier)
+                    # Create personal org
+                    from .orgs import get_org_store
+
+                    get_org_store().ensure_personal_org(user_id, email)
+                    logger.info(f"Auto-registered user {email} (tier={tier})")
             except Exception:
                 pass  # Non-critical — don't block the request
 
