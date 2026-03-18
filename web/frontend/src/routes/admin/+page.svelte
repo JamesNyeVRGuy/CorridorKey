@@ -32,6 +32,7 @@
 	let actionInProgress = $state<string | null>(null);
 	let inviteUrl = $state('');
 	let inviteGenerating = $state(false);
+	let invites = $state<{ token: string; created_at: number; used: boolean; used_by: string | null }[]>([]);
 
 	async function adminFetch(path: string, opts?: RequestInit) {
 		const token = localStorage.getItem('ck:auth_token');
@@ -60,6 +61,7 @@
 		try {
 			const res = await adminFetch('/api/auth/invite/generate', { method: 'POST' });
 			inviteUrl = `${window.location.origin}${res.signup_url}`;
+			await loadInvites();
 		} catch (e) {
 			inviteError = e instanceof Error ? e.message : 'Failed to generate invite';
 		} finally {
@@ -69,6 +71,15 @@
 
 	async function copyInvite() {
 		await navigator.clipboard.writeText(inviteUrl);
+	}
+
+	async function loadInvites() {
+		try {
+			const res = await adminFetch('/api/auth/invites');
+			invites = res.invites;
+		} catch {
+			invites = [];
+		}
 	}
 
 	async function loadOrgs() {
@@ -125,7 +136,7 @@
 		}
 		authorized = true;
 		try {
-			await Promise.all([loadUsers(), loadOrgs()]);
+			await Promise.all([loadUsers(), loadOrgs(), loadInvites()]);
 		} finally {
 			loading = false;
 		}
@@ -184,6 +195,36 @@
 						</div>
 					{/if}
 				</div>
+				{#if invites.length > 0}
+					<div class="invite-list">
+						<table class="data-table">
+							<thead>
+								<tr>
+									<th class="mono">TOKEN</th>
+									<th class="mono">STATUS</th>
+									<th class="mono">USED BY</th>
+									<th class="mono">CREATED</th>
+								</tr>
+							</thead>
+							<tbody>
+								{#each invites as inv}
+									<tr>
+										<td class="mono">{inv.token}</td>
+										<td>
+											{#if inv.used}
+												<span class="status-badge used mono">USED</span>
+											{:else}
+												<span class="status-badge available mono">AVAILABLE</span>
+											{/if}
+										</td>
+										<td class="mono">{inv.used_by ?? '—'}</td>
+										<td class="mono">{formatDate(inv.created_at)}</td>
+									</tr>
+								{/each}
+							</tbody>
+						</table>
+					</div>
+				{/if}
 			</div>
 
 			<!-- Pending Approvals -->
@@ -524,6 +565,26 @@
 		outline: none;
 	}
 	.invite-url:focus { border-color: var(--accent); }
+
+	.invite-list {
+		margin-top: var(--sp-3);
+	}
+
+	.status-badge {
+		font-size: 10px;
+		letter-spacing: 0.06em;
+		padding: 2px 8px;
+		border-radius: 3px;
+		font-weight: 600;
+	}
+	.status-badge.available {
+		background: rgba(93, 216, 121, 0.12);
+		color: var(--state-complete);
+	}
+	.status-badge.used {
+		background: rgba(117, 117, 117, 0.12);
+		color: var(--state-cancelled);
+	}
 
 	.form-error {
 		padding: var(--sp-2) var(--sp-3);
