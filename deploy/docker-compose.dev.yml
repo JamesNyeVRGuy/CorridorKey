@@ -1,0 +1,40 @@
+# Development stack — builds from source, reads deploy/.env
+#
+# Run from deploy/ directory:
+#   docker compose -f docker-compose.dev.yml up -d --build
+#
+# Includes web server + Supabase. Add nodes separately if needed.
+
+services:
+  corridorkey-web:
+    build:
+      context: ..
+      dockerfile: web/Dockerfile.web
+    user: "${UID:-1000}:${GID:-1000}"
+    restart: unless-stopped
+    ports:
+      - "${CK_PORT:-3000}:3000"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    environment:
+      - OPENCV_IO_ENABLE_OPENEXR=1
+      - NVIDIA_VISIBLE_DEVICES=${NVIDIA_VISIBLE_DEVICES:-all}
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility,video
+      - CK_CLIPS_DIR=/app/Projects
+      - CK_AUTH_ENABLED=${CK_AUTH_ENABLED:-false}
+      - CK_JWT_SECRET=${CK_JWT_SECRET:-}
+      - CK_SUPABASE_URL=${CK_SUPABASE_URL:-}
+      - CK_AUTH_TOKEN=${CK_AUTH_TOKEN:-}
+      - CK_SENTRY_DSN=${CK_SENTRY_DSN:-}
+      - CK_METRICS_ENABLED=${CK_METRICS_ENABLED:-false}
+      - CK_ENVIRONMENT=${CK_ENVIRONMENT:-development}
+    volumes:
+      - ${CK_PROJECTS_DIR:-./Projects}:/app/Projects
+      - ${CK_WEIGHTS_DIR:-./weights}/corridorkey:/app/CorridorKeyModule/checkpoints
+      - ${CK_WEIGHTS_DIR:-./weights}/gvm:/app/gvm_core/weights
+      - ${CK_WEIGHTS_DIR:-./weights}/videomama:/app/VideoMaMaInferenceModule/checkpoints/VideoMaMa
