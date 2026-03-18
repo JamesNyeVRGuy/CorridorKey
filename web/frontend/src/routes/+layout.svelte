@@ -11,8 +11,10 @@
 	import ToastContainer from '../components/ToastContainer.svelte';
 	import KeyboardHelp from '../components/KeyboardHelp.svelte';
 	import { toast } from '$lib/stores/toasts';
+	import { goto } from '$app/navigation';
 
 	let { children } = $props();
+	let authChecked = $state(false);
 
 	let connected = $state(false);
 
@@ -33,7 +35,28 @@
 		}
 	}
 
-	onMount(() => {
+	const publicPaths = ['/login', '/signup', '/pending'];
+
+	onMount(async () => {
+		// Check if auth is enabled and redirect to login if needed
+		const currentPath = page.url.pathname;
+		if (!publicPaths.some((p) => currentPath.startsWith(p))) {
+			try {
+				const status = await fetch('/api/auth/status').then((r) => r.json());
+				if (status.auth_enabled) {
+					// Check if we have a stored token
+					const token = localStorage.getItem('ck:auth_token');
+					if (!token) {
+						goto('/login');
+						return;
+					}
+				}
+			} catch {
+				// Auth endpoint not available — assume auth disabled
+			}
+		}
+		authChecked = true;
+
 		// Request notification permission
 		if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
 			Notification.requestPermission();
@@ -101,6 +124,7 @@
 	});
 </script>
 
+{#if authChecked}
 <div class="shell">
 	<nav class="sidebar">
 		<div class="sidebar-top">
@@ -170,6 +194,9 @@
 		{@render children()}
 	</main>
 </div>
+{:else}
+	{@render children()}
+{/if}
 
 <ToastContainer />
 <KeyboardHelp />
