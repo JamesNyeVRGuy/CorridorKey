@@ -19,6 +19,7 @@ from backend.project import (
 )
 
 from ..deps import get_queue, get_service
+from ..path_security import safe_extract_zip
 from ..routes import clips as _clips_mod
 
 logger = logging.getLogger(__name__)
@@ -118,7 +119,7 @@ async def upload_frames(file: UploadFile, name: str | None = None):
         extract_dir = os.path.join(tmpdir, "extracted")
         try:
             with zipfile.ZipFile(zip_path, "r") as zf:
-                zf.extractall(extract_dir)
+                safe_extract_zip(zf, extract_dir)
         except zipfile.BadZipFile:
             raise HTTPException(status_code=400, detail="Invalid zip file") from None
 
@@ -210,7 +211,7 @@ async def upload_alpha_hint(clip_name: str, file: UploadFile):
         extract_dir = os.path.join(tmpdir, "extracted")
         try:
             with zipfile.ZipFile(zip_path, "r") as zf:
-                zf.extractall(extract_dir)
+                safe_extract_zip(zf, extract_dir)
         except zipfile.BadZipFile:
             raise HTTPException(status_code=400, detail="Invalid zip file") from None
 
@@ -273,7 +274,7 @@ async def upload_videomama_mask(clip_name: str, file: UploadFile):
         extract_dir = os.path.join(tmpdir, "extracted")
         try:
             with zipfile.ZipFile(zip_path, "r") as zf:
-                zf.extractall(extract_dir)
+                safe_extract_zip(zf, extract_dir)
         except zipfile.BadZipFile:
             raise HTTPException(status_code=400, detail="Invalid zip file") from None
 
