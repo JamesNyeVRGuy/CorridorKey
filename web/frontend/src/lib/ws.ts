@@ -1,4 +1,4 @@
-/** WebSocket client with auto-reconnect. */
+/** WebSocket client with auto-reconnect and JWT auth (CRKY-13). */
 
 export interface WSMessage {
 	type: string;
@@ -14,7 +14,14 @@ let intentionallyClosed = false;
 
 function getWsUrl(): string {
 	const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-	return `${proto}//${window.location.host}/ws`;
+	let url = `${proto}//${window.location.host}/ws`;
+
+	// Append JWT token if available (required when auth is enabled)
+	const token = localStorage.getItem('ck:auth_token');
+	if (token) {
+		url += `?token=${encodeURIComponent(token)}`;
+	}
+	return url;
 }
 
 function doConnect() {
