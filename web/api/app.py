@@ -18,7 +18,7 @@ from backend.project import projects_root
 from . import persist
 from .deps import get_queue, get_service
 from .reaper import start_reaper
-from .routes import clips, jobs, nodes, preview, projects, system, upload
+from .routes import auth, clips, jobs, nodes, preview, projects, system, upload
 from .worker import start_worker
 from .ws import manager, websocket_endpoint
 
@@ -146,6 +146,7 @@ def create_app() -> FastAPI:
     app.add_middleware(GZipMiddleware, minimum_size=1000)
 
     # API routes
+    app.include_router(auth.router)
     app.include_router(clips.router)
     app.include_router(jobs.router)
     app.include_router(system.router)
