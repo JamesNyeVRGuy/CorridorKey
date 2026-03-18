@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import io
 import logging
 import os
+import tarfile
 
-from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
 from backend.job_queue import JobStatus
@@ -385,6 +387,75 @@ def download_clip_file(node_id: str, clip_name: str, pass_name: str, filename: s
             return FileResponse(fpath)
 
     raise HTTPException(status_code=404, detail=f"File not found: {filename}")
+
+
+@router.get("/{node_id}/files/{clip_name}/{pass_name}/bundle")
+def download_clip_bundle(
+    node_id: str,
+    clip_name: str,
+    pass_name: str,
+    start: int = Query(0),
+    end: int = Query(-1),
+):
+    """Download multiple files as a tar stream. Much faster than one-per-file."""
+    _PASS_MAP = {
+        "input": ["Frames", "Input"],
+        "alpha": ["AlphaHint"],
+        "mask": ["VideoMamaMaskHint"],
+        "source": ["Source"],
+    }
+
+    dirs = _PASS_MAP.get(pass_name)
+    if not dirs:
+        raise HTTPException(status_code=400, detail=f"Unknown pass: {pass_name}")
+
+    service = get_service()
+    clips = service.scan_clips(_clips_mod._clips_dir)
+    clip = next((c for c in clips if c.name == clip_name), None)
+    if not clip:
+        raise HTTPException(status_code=404, detail=f"Clip '{clip_name}' not found")
+
+    target_dir = None
+    directory = None
+    for d in dirs:
+        candidate = os.path.join(clip.root_path, d)
+        if os.path.isdir(candidate):
+            target_dir = candidate
+            directory = d
+            break
+
+    if not target_dir:
+        raise HTTPException(status_code=404, detail=f"No files for pass {pass_name}")
+
+    files = natsorted(os.listdir(target_dir))
+    if end > 0:
+        files = files[start:end]
+    elif start > 0:
+        files = files[start:]
+
+    def generate_tar():
+        buf = io.BytesIO()
+        with tarfile.open(fileobj=buf, mode="w|") as tar:
+            for fname in files:
+                fpath = os.path.join(target_dir, fname)
+                if os.path.isfile(fpath):
+                    tar.add(fpath, arcname=os.path.join(directory, fname))
+                    buf.seek(0)
+                    data = buf.read()
+                    buf.seek(0)
+                    buf.truncate()
+                    if data:
+                        yield data
+        buf.seek(0)
+        remaining = buf.read()
+        if remaining:
+            yield remaining
+
+    return StreamingResponse(
+        generate_tar(),
+        media_type="application/x-tar",
+        headers={"X-Tar-Directory": directory, "X-Tar-Count": str(len(files))},
+    )
 
 
 @router.post("/{node_id}/files/{clip_name}/{pass_name}/{filename}")

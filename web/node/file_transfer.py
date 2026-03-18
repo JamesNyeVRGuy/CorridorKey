@@ -1,13 +1,15 @@
 """File transfer utilities for nodes without shared storage.
 
 Downloads input frames from the main machine and uploads results back.
-Limits concurrent transfers to avoid saturating the network.
+Uses tar bundle downloads for speed, with per-file fallback.
 """
 
 from __future__ import annotations
 
+import io
 import logging
 import os
+import tarfile
 import threading
 from pathlib import Path
 
@@ -53,9 +55,8 @@ class FileTransfer:
     ) -> int:
         """Download files for a clip pass into the correct subdirectory.
 
-        Uses the server's reported directory name so the local layout
-        matches what clip_state scanning expects. Acquires the transfer
-        semaphore to limit network saturation.
+        Tries tar bundle download first (single HTTP request for all files),
+        falls back to per-file download if the bundle endpoint isn't available.
 
         Args:
             clip_name: Name of the clip.
@@ -65,11 +66,61 @@ class FileTransfer:
 
         Returns the number of files downloaded.
         """
+        # Try bundle download first
+        try:
+            count = self._download_bundle(clip_name, pass_name, clip_dir, frame_range)
+            if count > 0:
+                return count
+        except Exception as e:
+            logger.debug(f"Bundle download failed, falling back to per-file: {e}")
+
+        return self._download_per_file(clip_name, pass_name, clip_dir, frame_range)
+
+    def _download_bundle(
+        self, clip_name: str, pass_name: str, clip_dir: str, frame_range: tuple[int, int] | None
+    ) -> int:
+        """Download files as a tar stream (single HTTP request)."""
+        params = {}
+        if frame_range:
+            params["start"] = frame_range[0]
+            params["end"] = frame_range[1]
+
+        url = self._url(f"{clip_name}/{pass_name}/bundle")
+        with _transfer_semaphore, httpx.Client(timeout=self.timeout, headers=self._headers) as client:
+            with client.stream("GET", url, params=params) as resp:
+                if resp.status_code != 200:
+                    return 0
+
+                # Stream tar data and extract
+                buf = io.BytesIO()
+                for chunk in resp.iter_bytes(chunk_size=8 * 1024 * 1024):
+                    buf.write(chunk)
+                buf.seek(0)
+
+                count = 0
+                with tarfile.open(fileobj=buf, mode="r|") as tar:
+                    for member in tar:
+                        if member.isfile():
+                            dest = os.path.join(clip_dir, member.name)
+                            os.makedirs(os.path.dirname(dest), exist_ok=True)
+                            with open(dest, "wb") as f:
+                                extracted = tar.extractfile(member)
+                                if extracted:
+                                    f.write(extracted.read())
+                            count += 1
+
+        directory = resp.headers.get("x-tar-directory", pass_name)
+        logger.info(f"Downloaded {count} files (bundle) for {clip_name}/{pass_name} → {directory}/")
+        return count
+
+    def _download_per_file(
+        self, clip_name: str, pass_name: str, clip_dir: str, frame_range: tuple[int, int] | None
+    ) -> int:
+        """Download files one at a time (fallback)."""
         directory, files = self.list_files(clip_name, pass_name)
         if not files or not directory:
             return 0
 
-        # Filter to frame range if specified (files are naturally sorted)
         if frame_range is not None:
             start, end = frame_range
             files = files[start:end]
@@ -83,7 +134,7 @@ class FileTransfer:
                 dest_path = os.path.join(dest_dir, fname)
                 if os.path.isfile(dest_path):
                     count += 1
-                    continue  # skip already downloaded
+                    continue
 
                 url = self._url(f"{clip_name}/{pass_name}/{fname}")
                 tmp_path = dest_path + ".part"
@@ -95,7 +146,6 @@ class FileTransfer:
                                 f.write(chunk)
                     os.replace(tmp_path, dest_path)
                 except Exception:
-                    # Clean up partial file on failure
                     if os.path.isfile(tmp_path):
                         os.remove(tmp_path)
                     raise

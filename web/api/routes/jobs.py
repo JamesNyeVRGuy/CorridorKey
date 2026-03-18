@@ -102,19 +102,25 @@ def submit_sharded_inference(req: ShardedInferenceRequest):
     service = get_service()
     submitted = []
 
-    # Count available GPU slots (local + remote nodes)
-    available_gpus = 1
+    # Count available GPU slots with VRAM weights for proportional sharding
+    gpu_weights: list[float] = []
     try:
         from device_utils import enumerate_gpus
 
-        local_gpus = enumerate_gpus()
-        available_gpus = max(1, len(local_gpus))
+        for g in enumerate_gpus():
+            gpu_weights.append(max(1.0, g.vram_total_gb))
     except Exception:
-        pass
+        gpu_weights.append(1.0)
 
     online_nodes = [n for n in registry.list_nodes() if n.can_accept_jobs and n.accepts_job_type("inference")]
     for node in online_nodes:
-        available_gpus += max(1, node.gpu_count)
+        if node.gpus:
+            for g in node.gpus:
+                gpu_weights.append(max(1.0, g.vram_total_gb))
+        else:
+            gpu_weights.append(max(1.0, node.vram_total_gb))
+
+    available_gpus = len(gpu_weights)
 
     for clip_name in req.clip_names:
         # Get frame count
@@ -149,13 +155,22 @@ def submit_sharded_inference(req: ShardedInferenceRequest):
                 submitted.append(_job_to_schema(job))
             continue
 
-        # Create shard group
+        # Create shard group with proportional frame distribution
         group_id = uuid.uuid4().hex[:8]
-        frames_per_shard = frame_count // num_shards
+        weights = gpu_weights[:num_shards]
+        total_weight = sum(weights)
+        # Distribute frames proportionally to GPU VRAM
+        shard_ranges = []
+        cursor = 0
+        for i, w in enumerate(weights):
+            if i == num_shards - 1:
+                shard_ranges.append((cursor, frame_count))
+            else:
+                frames = max(1, round(frame_count * w / total_weight))
+                shard_ranges.append((cursor, min(cursor + frames, frame_count)))
+                cursor += frames
 
-        for i in range(num_shards):
-            start = i * frames_per_shard
-            end = frame_count if i == num_shards - 1 else (i + 1) * frames_per_shard
+        for i, (start, end) in enumerate(shard_ranges):
             job = GPUJob(
                 job_type=JobType.INFERENCE,
                 clip_name=clip_name,
