@@ -192,7 +192,7 @@
 			{#if authEnabled}
 				{@const user = getStoredUser()}
 				<div class="user-row">
-					<span class="user-email mono">{user?.email ?? ''}</span>
+					<a href="/profile" class="user-email mono">{user?.email ?? ''}</a>
 					<button class="logout-btn mono" onclick={handleLogout}>LOGOUT</button>
 				</div>
 			{/if}
