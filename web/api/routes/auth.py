@@ -14,11 +14,12 @@ import os
 import secrets
 import time
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from .. import persist
 from ..auth import AUTH_ENABLED
+from ..tier_guard import require_admin
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -56,9 +57,9 @@ def auth_status():
     }
 
 
-@router.post("/invite/generate")
+@router.post("/invite/generate", dependencies=[Depends(require_admin)])
 def generate_invite_token():
-    """Generate an invite token for sharing. Admin only (enforced by caller)."""
+    """Generate an invite token for sharing. Admin only."""
     if not AUTH_ENABLED:
         raise HTTPException(status_code=400, detail="Auth is not enabled")
 
@@ -99,9 +100,9 @@ def consume_invite_token(token: str, email: str):
     return {"status": "consumed"}
 
 
-@router.get("/invites")
+@router.get("/invites", dependencies=[Depends(require_admin)])
 def list_invites():
-    """List all invite tokens. Admin only (enforced by caller)."""
+    """List all invite tokens. Admin only."""
     invites = persist.load_key("invite_tokens", {})
     return {
         "invites": [
