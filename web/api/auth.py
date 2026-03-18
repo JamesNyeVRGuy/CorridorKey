@@ -44,7 +44,10 @@ PUBLIC_PATHS = {
 PUBLIC_PREFIXES = (
     "/_app/",  # SvelteKit static assets
     "/ws",  # WebSocket (has its own auth, CRKY-13)
-    "/api/auth/",  # All auth endpoints are public
+    "/api/auth/status",  # Auth status check
+    "/api/auth/signup",  # Server-side signup
+    "/api/auth/invite/validate",  # Invite validation (pre-signup)
+    "/api/auth/invite/consume",  # Invite consumption (post-signup)
     "/api/nodes/",  # Nodes use CK_AUTH_TOKEN, not JWT
     "/api/system/weights/",  # Weight sync for nodes
 )

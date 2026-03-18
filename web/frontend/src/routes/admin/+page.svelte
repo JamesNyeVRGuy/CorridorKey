@@ -51,12 +51,17 @@
 		pendingUsers = pendingRes.users;
 	}
 
+	let inviteError = $state('');
+
 	async function generateInvite() {
 		inviteGenerating = true;
 		inviteUrl = '';
+		inviteError = '';
 		try {
 			const res = await adminFetch('/api/auth/invite/generate', { method: 'POST' });
 			inviteUrl = `${window.location.origin}${res.signup_url}`;
+		} catch (e) {
+			inviteError = e instanceof Error ? e.message : 'Failed to generate invite';
 		} finally {
 			inviteGenerating = false;
 		}
@@ -169,6 +174,9 @@
 					<button class="btn btn-primary mono" onclick={generateInvite} disabled={inviteGenerating}>
 						{inviteGenerating ? 'Generating...' : 'Generate Invite Link'}
 					</button>
+					{#if inviteError}
+						<div class="form-error mono">{inviteError}</div>
+					{/if}
 					{#if inviteUrl}
 						<div class="invite-result">
 							<input type="text" class="invite-url mono" value={inviteUrl} readonly />
@@ -516,6 +524,15 @@
 		outline: none;
 	}
 	.invite-url:focus { border-color: var(--accent); }
+
+	.form-error {
+		padding: var(--sp-2) var(--sp-3);
+		background: rgba(255, 82, 82, 0.08);
+		border: 1px solid rgba(255, 82, 82, 0.2);
+		border-radius: 6px;
+		font-size: 12px;
+		color: var(--state-error);
+	}
 
 	/* Data table */
 	.table-wrap {
