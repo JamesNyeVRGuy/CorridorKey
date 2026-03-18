@@ -25,6 +25,26 @@ from ..routes import clips as _clips_mod
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/upload", tags=["upload"])
 
+# Max upload size in bytes. Default 10 GB. Set CK_MAX_UPLOAD_MB to override.
+_MAX_UPLOAD_BYTES = int(os.environ.get("CK_MAX_UPLOAD_MB", "10240")) * 1024 * 1024
+_CHUNK_SIZE = 8 * 1024 * 1024
+
+
+async def _save_upload(file: UploadFile, dest: str) -> None:
+    """Save an uploaded file to dest with size limit enforcement."""
+    total = 0
+    with open(dest, "wb") as f:
+        while chunk := await file.read(_CHUNK_SIZE):
+            total += len(chunk)
+            if total > _MAX_UPLOAD_BYTES:
+                f.close()
+                os.unlink(dest)
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"Upload exceeds maximum size ({_MAX_UPLOAD_BYTES // (1024 * 1024)} MB)",
+                )
+            f.write(chunk)
+
 
 @router.post("/video")
 async def upload_video(file: UploadFile, name: str | None = None, auto_extract: bool = True):
@@ -47,9 +67,9 @@ async def upload_video(file: UploadFile, name: str | None = None, auto_extract: 
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp_path = os.path.join(tmpdir, file.filename)
         try:
-            with open(tmp_path, "wb") as f:
-                while chunk := await file.read(8 * 1024 * 1024):
-                    f.write(chunk)
+            await _save_upload(file, tmp_path)
+        except HTTPException:
+            raise
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Failed to save upload: {e}") from e
 
@@ -109,9 +129,9 @@ async def upload_frames(file: UploadFile, name: str | None = None):
     with tempfile.TemporaryDirectory() as tmpdir:
         zip_path = os.path.join(tmpdir, file.filename)
         try:
-            with open(zip_path, "wb") as f:
-                while chunk := await file.read(8 * 1024 * 1024):
-                    f.write(chunk)
+            await _save_upload(file, zip_path)
+        except HTTPException:
+            raise
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Failed to save upload: {e}") from e
 
@@ -202,9 +222,9 @@ async def upload_alpha_hint(clip_name: str, file: UploadFile):
     with tempfile.TemporaryDirectory() as tmpdir:
         zip_path = os.path.join(tmpdir, file.filename)
         try:
-            with open(zip_path, "wb") as f:
-                while chunk := await file.read(8 * 1024 * 1024):
-                    f.write(chunk)
+            await _save_upload(file, zip_path)
+        except HTTPException:
+            raise
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Failed to save upload: {e}") from e
 
@@ -265,9 +285,9 @@ async def upload_videomama_mask(clip_name: str, file: UploadFile):
     with tempfile.TemporaryDirectory() as tmpdir:
         zip_path = os.path.join(tmpdir, file.filename)
         try:
-            with open(zip_path, "wb") as f:
-                while chunk := await file.read(8 * 1024 * 1024):
-                    f.write(chunk)
+            await _save_upload(file, zip_path)
+        except HTTPException:
+            raise
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Failed to save upload: {e}") from e
 
