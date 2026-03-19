@@ -186,6 +186,20 @@ def node_heartbeat(node_id: str, req: NodeHeartbeatRequest):
         if req.cpu_stats:
             node.cpu_stats = req.cpu_stats
             node.record_health()
+        # Track contributed GPU-seconds when node is processing (CRKY-39)
+        if req.status == "busy" and node.org_id:
+            import time
+
+            now = time.time()
+            last = node.last_heartbeat
+            # Credit the time since last heartbeat, capped at 2x heartbeat interval
+            # to avoid crediting huge gaps (e.g., after a network outage)
+            delta = min(now - last, 30.0)  # max 30s per heartbeat
+            if delta > 0:
+                gpu_count = max(1, len(node.gpus))
+                from ..gpu_credits import add_contributed
+
+                add_contributed(node.org_id, delta * gpu_count)
         manager.send_node_update(node.to_dict())
     return {"status": "ok"}
 
