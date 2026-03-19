@@ -32,10 +32,10 @@ class NodeToken:
     node_id: str | None = None  # set when a node registers with this token
     revoked: bool = False
 
-    def to_dict(self) -> dict[str, Any]:
+    def _storage_dict(self) -> dict[str, Any]:
+        """Dict for storage — only dataclass fields, no computed values."""
         return {
             "token": self.token,
-            "token_preview": self.token[:8] + "...",
             "org_id": self.org_id,
             "label": self.label,
             "created_by": self.created_by,
@@ -44,6 +44,12 @@ class NodeToken:
             "node_id": self.node_id,
             "revoked": self.revoked,
         }
+
+    def to_dict(self) -> dict[str, Any]:
+        """Full dict including computed token_preview — for API responses."""
+        d = self._storage_dict()
+        d["token_preview"] = self.token[:8] + "..."
+        return d
 
     def to_safe_dict(self) -> dict[str, Any]:
         """Dict without the full token — for listing."""
@@ -77,7 +83,7 @@ class NodeTokenStore:
             created_at=time.time(),
         )
         tokens = self._load()
-        tokens[token] = record.to_dict()
+        tokens[token] = record._storage_dict()
         self._save(tokens)
         return record
 
@@ -89,8 +95,9 @@ class NodeTokenStore:
             return None
         # Update last_used_at
         data["last_used_at"] = time.time()
+        clean = self._clean(data)
         self._save(tokens)
-        return NodeToken(**data)
+        return NodeToken(**clean)
 
     def mark_used_by_node(self, token: str, node_id: str) -> None:
         """Associate a token with a specific node after registration."""
@@ -100,18 +107,23 @@ class NodeTokenStore:
             tokens[token]["last_used_at"] = time.time()
             self._save(tokens)
 
+    @staticmethod
+    def _clean(data: dict) -> dict:
+        """Strip non-dataclass fields from stored data."""
+        return {k: v for k, v in data.items() if k in NodeToken.__dataclass_fields__}
+
     def list_for_org(self, org_id: str) -> list[NodeToken]:
         """List all tokens for an org."""
         tokens = self._load()
         return [
-            NodeToken(**v) for v in tokens.values()
+            NodeToken(**self._clean(v)) for v in tokens.values()
             if v.get("org_id") == org_id
         ]
 
     def list_all(self) -> list[NodeToken]:
         """List all tokens (platform admin)."""
         tokens = self._load()
-        return [NodeToken(**v) for v in tokens.values()]
+        return [NodeToken(**self._clean(v)) for v in tokens.values()]
 
     def revoke(self, token: str) -> bool:
         """Revoke a token. Returns True if found."""
