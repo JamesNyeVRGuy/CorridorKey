@@ -133,7 +133,8 @@ services:
       - CK_JWT_SECRET=${JWT_SECRET:-}
       - CK_SUPABASE_URL=http://supabase-rest:3000
       - CK_SUPABASE_SERVICE_KEY=${SERVICE_ROLE_KEY:-}
-      - CK_GOTRUE_URL=http://supabase-auth:9999
+      - CK_GOTRUE_URL=http://localhost:${GOTRUE_PORT:-54324}
+      - CK_GOTRUE_INTERNAL_URL=http://supabase-auth:9999
       - CK_AUTH_TOKEN=${CK_AUTH_TOKEN:-}
       - CK_DATABASE_URL=postgresql://postgres:${POSTGRES_PASSWORD}@supabase-db:5432/${POSTGRES_DB:-corridorkey}
       - CK_SENTRY_DSN=${CK_SENTRY_DSN:-}

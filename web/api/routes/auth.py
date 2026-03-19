@@ -144,8 +144,8 @@ def signup_with_invite(req: SignupRequest):
     if invite.get("used"):
         raise HTTPException(status_code=409, detail="Invite token already used")
 
-    # Create user via GoTrue admin API
-    gotrue_url = os.environ.get("CK_GOTRUE_URL", "http://localhost:54324")
+    # Create user via GoTrue admin API (use internal URL for server-to-server)
+    gotrue_url = os.environ.get("CK_GOTRUE_INTERNAL_URL", os.environ.get("CK_GOTRUE_URL", "http://localhost:54324"))
     service_key = os.environ.get("CK_SUPABASE_SERVICE_KEY", "")
 
     if service_key:
