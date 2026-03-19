@@ -57,6 +57,7 @@ web = [
     "PyJWT>=2.8",
     "sentry-sdk[fastapi]>=2.0",
     "psycopg2-binary>=2.9",
+    "alembic>=1.13",
 ]
 
 [dependency-groups]

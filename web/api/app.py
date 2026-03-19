@@ -75,6 +75,11 @@ async def lifespan(app: FastAPI):
     preview.set_clips_dir(clips_dir)
     persist.init(clips_dir)
 
+    # Run database migrations if Postgres is configured (CRKY-49)
+    from .migrate import run_migrations
+
+    run_migrations()
+
     # Set base clips dir for org isolation (CRKY-10)
     from .org_isolation import set_base_clips_dir
 
