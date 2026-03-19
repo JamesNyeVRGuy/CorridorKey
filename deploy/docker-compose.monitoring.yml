@@ -1,4 +1,4 @@
-# Grafana + Prometheus monitoring stack for CorridorKey (CRKY-27)
+# Grafana + Prometheus + Loki monitoring stack for CorridorKey (CRKY-27, CRKY-50)
 #
 # Add to an existing deployment:
 #   docker compose -f docker-compose.dev.yml -f docker-compose.monitoring.yml up -d
@@ -8,10 +8,12 @@
 #
 # Prerequisites:
 #   Set CK_METRICS_ENABLED=true on the web server
+#   Set CK_LOG_FORMAT=json for structured log ingestion
 #
 # Access:
 #   Grafana:    http://localhost:3001  (admin / admin)
 #   Prometheus: http://localhost:9090
+#   Loki:       http://localhost:3100  (internal — query via Grafana)
 
 services:
   prometheus:
@@ -28,11 +30,33 @@ services:
       - --storage.tsdb.retention.time=30d
       - --web.enable-lifecycle
 
+  loki:
+    image: grafana/loki:3.1.0
+    restart: unless-stopped
+    ports:
+      - "${LOKI_PORT:-3100}:3100"
+    volumes:
+      - ./monitoring/loki/loki-config.yml:/etc/loki/local-config.yaml:ro
+      - loki-data:/loki
+    command: -config.file=/etc/loki/local-config.yaml
+
+  promtail:
+    image: grafana/promtail:3.1.0
+    restart: unless-stopped
+    depends_on:
+      - loki
+    volumes:
+      - ./monitoring/promtail/promtail-config.yml:/etc/promtail/config.yml:ro
+      - /var/lib/docker/containers:/var/log/docker:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    command: -config.file=/etc/promtail/config.yml
+
   grafana:
     image: grafana/grafana:11.1.0
     restart: unless-stopped
     depends_on:
       - prometheus
+      - loki
     ports:
       - "${GRAFANA_PORT:-3001}:3000"
     environment:
@@ -49,3 +73,4 @@ services:
 volumes:
   prometheus-data:
   grafana-data:
+  loki-data:

@@ -1,0 +1,50 @@
+# Promtail configuration for CorridorKey (CRKY-50)
+#
+# Reads Docker container logs and ships to Loki.
+# Extracts structured fields from JSON log lines.
+
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  # Scrape Docker container logs
+  - job_name: docker
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: corridorkey
+          __path__: /var/log/docker/*/*.log
+
+    pipeline_stages:
+      # Parse Docker JSON log format
+      - docker: {}
+
+      # Try to parse the log line as JSON (structured logs)
+      - json:
+          expressions:
+            level: level
+            logger: logger
+            job_id: job_id
+            node_id: node_id
+            org_id: org_id
+            clip_name: clip_name
+            user_id: user_id
+
+      # Set log level as a label for filtering
+      - labels:
+          level:
+          logger:
+
+      # Drop debug logs in production
+      - match:
+          selector: '{level="debug"}'
+          action: drop
+          drop_counter_reason: debug_logs

@@ -220,7 +220,10 @@ async def lifespan(app: FastAPI):
 
 def create_app() -> FastAPI:
     """Application factory — call with uvicorn --factory."""
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
+    # Structured logging (CRKY-50): JSON or text based on CK_LOG_FORMAT
+    from .logging_config import configure_logging
+
+    configure_logging()
 
     # Initialize Sentry error monitoring (no-op if CK_SENTRY_DSN not set)
     from .sentry_setup import init_sentry
