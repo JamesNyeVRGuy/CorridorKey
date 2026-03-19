@@ -229,10 +229,13 @@ class NodeAgent:
         else:
             self._run_subprocess_gpu(job_data, clips_dir, gpu_index)
 
-        # Upload results and clean up temp directory
+        # Upload results BEFORE reporting completion
         if not use_shared and clips_dir:
             self._upload_results(clip_name, clips_dir, job_type=job_data.get("job_type", ""))
             self._cleanup_temp(clips_dir)
+
+        # Only report completed after results are uploaded to the server
+        self._report_result(job_id, "completed")
 
     def _download_job_files(self, job_data: dict) -> str:
         """Download input files for a job. Returns the clips_dir path.
@@ -361,7 +364,7 @@ class NodeAgent:
                     clip, job=job, on_progress=on_progress, on_warning=on_warning, chunk_size=chunk_size
                 )
 
-            self._report_result(job_id, "completed")
+            # Don't report completed here — _process_job reports after upload
         except Exception as e:
             logger.exception(f"Job {job_id} failed")
             self._report_result(job_id, "failed", str(e))
@@ -401,7 +404,7 @@ class NodeAgent:
             if status == "progress":
                 self._report_progress(job_id, msg.get("current", 0), msg.get("total", 0))
             elif status == "completed":
-                self._report_result(job_id, "completed")
+                # Don't report completed here — _process_job reports after upload
                 break
             elif status == "failed":
                 self._report_result(job_id, "failed", msg.get("error", "Unknown error"))
