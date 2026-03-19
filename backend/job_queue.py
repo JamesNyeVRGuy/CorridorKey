@@ -64,6 +64,7 @@ class GPUJob:
     submitted_by: str | None = None  # user_id of who submitted the job (CRKY-66)
     org_id: str | None = None  # org that owns this job (CRKY-66)
     started_at: float = 0  # timestamp when job started running
+    completed_at: float = 0  # timestamp when job finished (for duration calc)
     priority: int = 0  # higher = processed first
     shard_group: str | None = None  # links shards of the same job
     shard_index: int = 0  # which shard this is (0-based)
@@ -234,8 +235,11 @@ class GPUJobQueue:
 
     def complete_job(self, job: GPUJob) -> None:
         """Mark a job as successfully completed."""
+        import time
+
         with self._lock:
             job.status = JobStatus.COMPLETED
+            job.completed_at = time.time()
             if job in self._running_jobs:
                 self._running_jobs.remove(job)
             self._history.append(job)

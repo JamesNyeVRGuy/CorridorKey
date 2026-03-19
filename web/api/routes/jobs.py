@@ -88,33 +88,42 @@ def estimate_job_cost(job_type: str = "inference", frame_count: int = 0, num_sha
 
     Returns estimated GPU-seconds, GPU-minutes, and wall-clock time.
     """
-    import time
-
     queue = get_queue()
     history = queue.history_snapshot
 
-    # Compute average seconds-per-frame from completed jobs of this type
+    # Default estimates per job type (used when no history available)
+    defaults = {
+        "inference": 1.5,   # ~1.5s per frame on RTX 3090, ~0.5s on RTX 4090
+        "gvm_alpha": 2.5,   # ~2.5s per frame (heavy diffusion model)
+        "videomama_alpha": 1.5,
+        "video_extract": 0.05,
+        "video_stitch": 0.02,
+    }
+
+    # Compute median seconds-per-frame from completed jobs with valid timing
     completed = [
         j for j in history
         if j.status.value == "completed"
         and j.job_type.value == job_type
         and j.total_frames > 0
         and j.started_at > 0
+        and j.completed_at > j.started_at
     ]
 
     if completed:
-        total_time = sum(time.time() - j.started_at for j in completed if j.started_at > 0)
-        total_frames = sum(j.total_frames for j in completed)
-        avg_spf = total_time / total_frames if total_frames > 0 else 0
+        # Per-job seconds-per-frame, capped at 60s/frame to filter outliers
+        spf_values = []
+        for j in completed:
+            duration = j.completed_at - j.started_at
+            spf = duration / j.total_frames
+            if spf < 60:  # ignore jobs where download/upload dominated
+                spf_values.append(spf)
+        if spf_values:
+            spf_values.sort()
+            avg_spf = spf_values[len(spf_values) // 2]  # median
+        else:
+            avg_spf = defaults.get(job_type, 1.0)
     else:
-        # Default estimates per job type (rough, based on typical hardware)
-        defaults = {
-            "inference": 0.5,  # ~0.5s per frame on RTX 4090
-            "gvm_alpha": 2.5,  # ~2.5s per frame (heavy diffusion model)
-            "videomama_alpha": 1.5,
-            "video_extract": 0.05,
-            "video_stitch": 0.02,
-        }
         avg_spf = defaults.get(job_type, 1.0)
 
     estimated_seconds = avg_spf * frame_count

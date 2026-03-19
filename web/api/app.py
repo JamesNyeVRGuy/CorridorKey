@@ -73,6 +73,7 @@ def _save_history_snapshot(queue) -> None:
                 "current_frame": j.current_frame,
                 "total_frames": j.total_frames,
                 "started_at": j.started_at,
+                "completed_at": j.completed_at,
                 "submitted_by": j.submitted_by,
                 "org_id": j.org_id,
             }
@@ -145,6 +146,7 @@ async def lifespan(app: FastAPI):
             job.current_frame = jd.get("current_frame", 0)
             job.total_frames = jd.get("total_frames", 0)
             job.started_at = jd.get("started_at", 0)
+            job.completed_at = jd.get("completed_at", 0)
             job.submitted_by = jd.get("submitted_by")
             job.org_id = jd.get("org_id")
             queue._history.append(job)
