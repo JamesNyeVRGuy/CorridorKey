@@ -177,6 +177,9 @@ class NodeRegistry:
                 existing.vram_free_gb = info.vram_free_gb
                 existing.capabilities = info.capabilities
                 existing.shared_storage = info.shared_storage
+                # Always update org_id from the token (may change if re-registered with different token)
+                if info.org_id:
+                    existing.org_id = info.org_id
                 existing.status = "online"
                 existing.last_heartbeat = time.time()
                 # Preserve paused and schedule on re-register (set from UI)
