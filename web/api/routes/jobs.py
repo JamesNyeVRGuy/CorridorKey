@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 from backend.job_queue import GPUJob, JobType
 
+from ..auth import get_current_user
 from ..deps import get_queue, get_service
 from ..nodes import registry
 from ..schemas import (
@@ -25,6 +26,26 @@ from ..schemas import (
 from ..tier_guard import require_member
 
 router = APIRouter(prefix="/api/jobs", tags=["jobs"], dependencies=[Depends(require_member)])
+
+
+def _stamp_job(job: GPUJob, request: Request | None) -> GPUJob:
+    """Set submitted_by and org_id from the authenticated user (CRKY-66)."""
+    if request is None:
+        return job
+    user = get_current_user(request)
+    if user:
+        job.submitted_by = user.user_id
+        job.org_id = user.org_ids[0] if user.org_ids else None
+    return job
+
+
+def _submit_jobs(jobs: list[GPUJob], request: Request) -> list[GPUJob]:
+    """Stamp and submit a list of jobs to the queue."""
+    queue = get_queue()
+    for job in jobs:
+        _stamp_job(job, request)
+        queue.submit(job)
+    return jobs
 
 
 def _job_to_schema(job: GPUJob) -> JobSchema:
@@ -64,7 +85,7 @@ def list_jobs():
 
 
 @router.post("/inference", response_model=list[JobSchema])
-def submit_inference(req: InferenceJobRequest):
+def submit_inference(req: InferenceJobRequest, request: Request):
     queue = get_queue()
     submitted = []
     for clip_name in req.clip_names:
@@ -77,6 +98,7 @@ def submit_inference(req: InferenceJobRequest):
                 "frame_range": list(req.frame_range) if req.frame_range else None,
             },
         )
+        _stamp_job(job, request)
         if queue.submit(job):
             submitted.append(_job_to_schema(job))
     if not submitted:
@@ -93,7 +115,7 @@ class ShardedInferenceRequest(BaseModel):
 
 
 @router.post("/inference/sharded", response_model=list[JobSchema])
-def submit_sharded_inference(req: ShardedInferenceRequest):
+def submit_sharded_inference(req: ShardedInferenceRequest, request: Request):
     """Submit inference split across multiple GPUs/nodes.
 
     Each shard processes a frame range independently. Only works for
@@ -152,6 +174,7 @@ def submit_sharded_inference(req: ShardedInferenceRequest):
                     "output_config": req.output_config.model_dump(),
                 },
             )
+            _stamp_job(job, request)
             if queue.submit(job):
                 submitted.append(_job_to_schema(job))
             continue
@@ -184,6 +207,7 @@ def submit_sharded_inference(req: ShardedInferenceRequest):
                 shard_index=i,
                 shard_total=num_shards,
             )
+            _stamp_job(job, request)
             if queue.submit(job):
                 submitted.append(_job_to_schema(job))
 
@@ -221,11 +245,12 @@ def retry_shard_group(group_id: str):
 
 
 @router.post("/gvm", response_model=list[JobSchema])
-def submit_gvm(req: GVMJobRequest):
+def submit_gvm(req: GVMJobRequest, request: Request):
     queue = get_queue()
     submitted = []
     for clip_name in req.clip_names:
         job = GPUJob(job_type=JobType.GVM_ALPHA, clip_name=clip_name)
+        _stamp_job(job, request)
         if queue.submit(job):
             submitted.append(_job_to_schema(job))
     if not submitted:
@@ -234,7 +259,7 @@ def submit_gvm(req: GVMJobRequest):
 
 
 @router.post("/videomama", response_model=list[JobSchema])
-def submit_videomama(req: VideoMaMaJobRequest):
+def submit_videomama(req: VideoMaMaJobRequest, request: Request):
     queue = get_queue()
     submitted = []
     for clip_name in req.clip_names:
@@ -243,6 +268,7 @@ def submit_videomama(req: VideoMaMaJobRequest):
             clip_name=clip_name,
             params={"chunk_size": req.chunk_size},
         )
+        _stamp_job(job, request)
         if queue.submit(job):
             submitted.append(_job_to_schema(job))
     if not submitted:
@@ -251,7 +277,7 @@ def submit_videomama(req: VideoMaMaJobRequest):
 
 
 @router.post("/pipeline", response_model=list[JobSchema])
-def submit_pipeline(req: PipelineJobRequest):
+def submit_pipeline(req: PipelineJobRequest, request: Request):
     """Submit the first step of a full pipeline.
 
     Only queues the NEXT needed step for each clip. When that step
@@ -305,6 +331,7 @@ def submit_pipeline(req: PipelineJobRequest):
         else:
             continue
 
+        _stamp_job(job, request)
         if queue.submit(job):
             submitted.append(_job_to_schema(job))
 
@@ -314,11 +341,12 @@ def submit_pipeline(req: PipelineJobRequest):
 
 
 @router.post("/extract", response_model=list[JobSchema])
-def submit_extract(req: ExtractJobRequest):
+def submit_extract(req: ExtractJobRequest, request: Request):
     queue = get_queue()
     submitted = []
     for clip_name in req.clip_names:
         job = GPUJob(job_type=JobType.VIDEO_EXTRACT, clip_name=clip_name)
+        _stamp_job(job, request)
         if queue.submit(job):
             submitted.append(_job_to_schema(job))
     if not submitted:
@@ -326,32 +354,49 @@ def submit_extract(req: ExtractJobRequest):
     return submitted
 
 
+def _check_job_ownership(job: GPUJob, request: Request) -> None:
+    """Verify the requesting user owns the job or is a platform admin (CRKY-66)."""
+    user = get_current_user(request)
+    if not user:
+        return  # Auth disabled
+    if user.is_admin:
+        return  # Platform admins bypass
+    if job.submitted_by and job.submitted_by != user.user_id:
+        raise HTTPException(status_code=403, detail="You can only manage your own jobs")
+
+
 @router.delete("/{job_id}")
-def cancel_job(job_id: str):
+def cancel_job(job_id: str, request: Request):
     queue = get_queue()
     job = queue.find_job_by_id(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found")
+    _check_job_ownership(job, request)
     queue.cancel_job(job)
     return {"status": "cancelled", "job_id": job_id}
 
 
 @router.post("/{job_id}/move")
-def move_job(job_id: str, position: int):
+def move_job(job_id: str, position: int, request: Request):
     """Move a queued job to a specific position (0 = front of queue)."""
     queue = get_queue()
+    job = queue.find_job_by_id(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found in queue")
+    _check_job_ownership(job, request)
     if not queue.move_job(job_id, position):
         raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found in queue")
     return {"status": "moved", "job_id": job_id, "position": position}
 
 
 @router.post("/{job_id}/priority")
-def set_job_priority(job_id: str, priority: int):
+def set_job_priority(job_id: str, priority: int, request: Request):
     """Set priority for a queued job. Higher = processed first."""
     queue = get_queue()
     job = queue.find_job_by_id(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found")
+    _check_job_ownership(job, request)
     if job.status.value != "queued":
         raise HTTPException(status_code=409, detail="Can only set priority on queued jobs")
     job.priority = priority

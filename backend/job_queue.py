@@ -61,6 +61,8 @@ class GPUJob:
     error_message: str | None = None
     claimed_by: str | None = None  # node_id or "local"
     preferred_node: str | None = None  # prefer dispatching to this node (pipeline pinning)
+    submitted_by: str | None = None  # user_id of who submitted the job (CRKY-66)
+    org_id: str | None = None  # org that owns this job (CRKY-66)
     started_at: float = 0  # timestamp when job started running
     priority: int = 0  # higher = processed first
     shard_group: str | None = None  # links shards of the same job
