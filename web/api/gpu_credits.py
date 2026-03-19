@@ -11,10 +11,15 @@ not available, falls back to the JSON storage backend.
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+# Starter credits granted to new orgs on user approval (GPU-seconds).
+# Default 3600 = 1 hour. Set to 0 to disable.
+STARTER_CREDITS = float(os.environ.get("CK_STARTER_CREDITS", "3600"))
 
 
 @dataclass

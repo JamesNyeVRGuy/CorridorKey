@@ -73,9 +73,14 @@ def approve_user(user_id: str, request: Request):
     # Set tier to member
     updated = user_store.set_tier(user_id, "member", approved_by=admin.user_id)
 
-    # Create personal org for the newly approved user
+    # Create personal org and grant starter credits
     org_store = get_org_store()
-    org_store.ensure_personal_org(user_id, user.email)
+    personal_org = org_store.ensure_personal_org(user_id, user.email)
+
+    from ..gpu_credits import STARTER_CREDITS, add_contributed
+
+    if STARTER_CREDITS > 0:
+        add_contributed(personal_org.org_id, STARTER_CREDITS)
 
     audit_from_request("user.approved", request, target_type="user", target_id=user_id,
                        details={"email": user.email})
