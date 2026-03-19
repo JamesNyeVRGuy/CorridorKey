@@ -25,6 +25,16 @@
 	let editingTypes = $state<string | null>(null);
 	let selectedTypes = $state<Set<string>>(new Set());
 
+	// Setup guide state
+	let showSetupGuide = $state(false);
+	let setupInfo = $state<{ main_url: string; image: string } | null>(null);
+	let generatedToken = $state('');
+	let tokenLabel = $state('');
+	let tokenGenerating = $state(false);
+	let nodeTokens = $state<{ token_preview: string; label: string; org_id: string; node_id: string | null; revoked: boolean; created_at: number }[]>([]);
+	let userOrgs = $state<{ org_id: string; name: string }[]>([]);
+	let selectedOrgId = $state('');
+
 	const ALL_JOB_TYPES = [
 		{ value: 'inference', label: 'Inference', kind: 'gpu' },
 		{ value: 'gvm_alpha', label: 'GVM Alpha', kind: 'gpu' },
@@ -49,6 +59,54 @@
 		}, 5000) : null;
 		return () => { clearInterval(interval); if (cpuInterval) clearInterval(cpuInterval); };
 	});
+
+	async function openSetupGuide() {
+		showSetupGuide = true;
+		try {
+			const [setup, orgsRes, tokensRes] = await Promise.all([
+				api.nodes.list().then(() => null).catch(() => null),  // just to warm up
+				fetch('/api/orgs', { headers: { 'Authorization': `Bearer ${localStorage.getItem('ck:auth_token')}` } }).then(r => r.json()),
+				fetch('/api/farm/tokens', { headers: { 'Authorization': `Bearer ${localStorage.getItem('ck:auth_token')}` } }).then(r => r.json()),
+			]);
+			setupInfo = await fetch('/api/farm/setup', { headers: { 'Authorization': `Bearer ${localStorage.getItem('ck:auth_token')}` } }).then(r => r.json());
+			userOrgs = orgsRes?.orgs ?? [];
+			nodeTokens = tokensRes?.tokens ?? [];
+			if (userOrgs.length > 0 && !selectedOrgId) selectedOrgId = userOrgs[0].org_id;
+		} catch { /* ignore */ }
+	}
+
+	async function generateNodeToken() {
+		if (!tokenLabel.trim() || !selectedOrgId) return;
+		tokenGenerating = true;
+		generatedToken = '';
+		try {
+			const res = await fetch('/api/farm/tokens', {
+				method: 'POST',
+				headers: {
+					'Authorization': `Bearer ${localStorage.getItem('ck:auth_token')}`,
+					'Content-Type': 'application/json'
+				},
+				body: JSON.stringify({ org_id: selectedOrgId, label: tokenLabel.trim() })
+			});
+			const data = await res.json();
+			if (res.ok) {
+				generatedToken = data.token;
+				tokenLabel = '';
+				// Refresh token list
+				const tokensRes = await fetch('/api/farm/tokens', { headers: { 'Authorization': `Bearer ${localStorage.getItem('ck:auth_token')}` } }).then(r => r.json());
+				nodeTokens = tokensRes?.tokens ?? [];
+			}
+		} catch { /* ignore */ }
+		finally { tokenGenerating = false; }
+	}
+
+	async function revokeToken(preview: string) {
+		await fetch(`/api/farm/tokens/${preview}`, {
+			method: 'DELETE',
+			headers: { 'Authorization': `Bearer ${localStorage.getItem('ck:auth_token')}` }
+		});
+		nodeTokens = nodeTokens.filter(t => t.token_preview !== preview);
+	}
 
 	function timeSince(ts: number): string {
 		const seconds = Math.floor(Date.now() / 1000 - ts);
@@ -247,6 +305,113 @@
 		<p class="subtitle">GPU processing, remote nodes, and scheduling</p>
 	</header>
 
+	<!-- Setup Guide -->
+	<section class="section">
+		<button class="setup-toggle mono" onclick={openSetupGuide}>
+			{showSetupGuide ? 'HIDE SETUP GUIDE' : 'HOW TO ADD A NODE'}
+			<svg width="12" height="12" viewBox="0 0 12 12" fill="none" class="chevron-icon" class:open={showSetupGuide}><path d="M3 4.5l3 3 3-3" stroke="currentColor" stroke-width="1.5"/></svg>
+		</button>
+
+		{#if showSetupGuide && setupInfo}
+			<div class="setup-guide">
+				<!-- Step 1: Generate Token -->
+				<div class="setup-step">
+					<h3 class="step-title mono">1. GENERATE A NODE TOKEN</h3>
+					<p class="step-desc">Each node needs its own auth token. Generate one for the machine you're adding.</p>
+					<div class="token-gen-row">
+						{#if userOrgs.length > 1}
+							<select class="setup-select mono" bind:value={selectedOrgId}>
+								{#each userOrgs as org}
+									<option value={org.org_id}>{org.name}</option>
+								{/each}
+							</select>
+						{/if}
+						<input type="text" class="setup-input" bind:value={tokenLabel} placeholder="Node name (e.g. Render-Box-A)" />
+						<button class="btn-setup mono" onclick={generateNodeToken} disabled={tokenGenerating || !tokenLabel.trim()}>
+							{tokenGenerating ? '...' : 'GENERATE'}
+						</button>
+					</div>
+					{#if generatedToken}
+						<div class="token-result">
+							<span class="token-label mono">Token (copy now — shown only once):</span>
+							<div class="token-copy-row">
+								<input type="text" class="token-value mono" value={generatedToken} readonly />
+								<button class="btn-copy mono" onclick={() => navigator.clipboard.writeText(generatedToken)}>COPY</button>
+							</div>
+						</div>
+					{/if}
+				</div>
+
+				<!-- Step 2: Run the node -->
+				<div class="setup-step">
+					<h3 class="step-title mono">2. START THE NODE</h3>
+					<p class="step-desc">On the remote machine, run one of these:</p>
+
+					<div class="code-block">
+						<span class="code-label mono">Docker Compose</span>
+						<pre class="code mono">services:
+  corridorkey-node:
+    image: {setupInfo.image}
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    environment:
+      - CK_MAIN_URL={setupInfo.main_url}
+      - CK_AUTH_TOKEN=&lt;paste token here&gt;
+      - CK_NODE_NAME=my-node
+      - CK_NODE_GPUS=auto</pre>
+					</div>
+
+					<div class="code-block">
+						<span class="code-label mono">Docker Run</span>
+						<pre class="code mono">docker run --gpus all -d \
+  -e CK_MAIN_URL={setupInfo.main_url} \
+  -e CK_AUTH_TOKEN=&lt;paste token here&gt; \
+  -e CK_NODE_NAME=my-node \
+  {setupInfo.image}</pre>
+					</div>
+
+					<div class="code-block">
+						<span class="code-label mono">Python (development)</span>
+						<pre class="code mono">CK_MAIN_URL={setupInfo.main_url} \
+CK_AUTH_TOKEN=&lt;paste token here&gt; \
+uv run python -m web.node</pre>
+					</div>
+				</div>
+
+				<!-- Active Tokens -->
+				{#if nodeTokens.length > 0}
+					<div class="setup-step">
+						<h3 class="step-title mono">ACTIVE TOKENS</h3>
+						<div class="token-list">
+							{#each nodeTokens as t}
+								<div class="token-row" class:revoked={t.revoked}>
+									<span class="token-preview mono">{t.token_preview}</span>
+									<span class="token-name">{t.label}</span>
+									{#if t.node_id}
+										<span class="token-status mono connected">CONNECTED</span>
+									{:else if t.revoked}
+										<span class="token-status mono revoked-badge">REVOKED</span>
+									{:else}
+										<span class="token-status mono unused">UNUSED</span>
+									{/if}
+									{#if !t.revoked}
+										<button class="btn-revoke mono" onclick={() => revokeToken(t.token_preview)}>REVOKE</button>
+									{/if}
+								</div>
+							{/each}
+						</div>
+					</div>
+				{/if}
+			</div>
+		{/if}
+	</section>
+
 	<!-- Local GPU Processing (platform admin only) -->
 	{#if isAdmin}
 	<section class="section">
@@ -349,10 +514,7 @@
 		{#if $nodes.length === 0}
 			<div class="empty-state">
 				<p class="mono">No remote nodes connected</p>
-				<div class="instructions">
-					<p>Start a node agent on a remote machine:</p>
-					<code class="mono">CK_MAIN_URL=http://this-machine:3000 uv run python -m web.node</code>
-				</div>
+				<p class="step-desc">Use the setup guide above to add a render node.</p>
 			</div>
 		{:else}
 			<div class="node-list">
@@ -1348,4 +1510,98 @@
 		font-size: 10px;
 		color: var(--text-tertiary);
 	}
+
+	/* Setup guide */
+	.setup-toggle {
+		display: flex; align-items: center; gap: var(--sp-2);
+		font-size: 12px; letter-spacing: 0.08em; color: var(--accent);
+		background: none; border: 1px solid var(--accent-dim);
+		border-radius: var(--radius-md); padding: 8px 16px;
+		cursor: pointer; transition: all 0.15s;
+	}
+	.setup-toggle:hover { background: var(--accent-muted); }
+	.chevron-icon { transition: transform 0.2s; }
+	.chevron-icon.open { transform: rotate(180deg); }
+
+	.setup-guide {
+		display: flex; flex-direction: column; gap: var(--sp-5);
+		margin-top: var(--sp-4); padding: var(--sp-5);
+		background: var(--surface-2); border: 1px solid var(--border);
+		border-radius: var(--radius-lg);
+	}
+
+	.setup-step { display: flex; flex-direction: column; gap: var(--sp-3); }
+	.step-title { font-size: 11px; letter-spacing: 0.1em; color: var(--accent); }
+	.step-desc { font-size: 13px; color: var(--text-secondary); line-height: 1.4; }
+
+	.token-gen-row { display: flex; gap: var(--sp-2); align-items: center; }
+	.setup-input {
+		flex: 1; padding: 8px 12px; background: var(--surface-3);
+		border: 1px solid var(--border); border-radius: var(--radius-sm);
+		color: var(--text-primary); font-size: 13px; outline: none;
+	}
+	.setup-input:focus { border-color: var(--accent); }
+	.setup-input::placeholder { color: var(--text-tertiary); }
+	.setup-select {
+		padding: 8px 10px; background: var(--surface-3);
+		border: 1px solid var(--border); border-radius: var(--radius-sm);
+		color: var(--text-secondary); font-size: 12px; cursor: pointer; outline: none;
+	}
+	.btn-setup {
+		padding: 8px 14px; background: var(--accent); color: #000;
+		font-weight: 600; font-size: 11px; border: none;
+		border-radius: var(--radius-sm); cursor: pointer; flex-shrink: 0;
+	}
+	.btn-setup:disabled { opacity: 0.4; cursor: not-allowed; }
+	.btn-setup:hover:not(:disabled) { background: #fff; }
+
+	.token-result {
+		display: flex; flex-direction: column; gap: var(--sp-2);
+		padding: var(--sp-3); background: rgba(93, 216, 121, 0.06);
+		border: 1px solid rgba(93, 216, 121, 0.2); border-radius: var(--radius-md);
+	}
+	.token-label { font-size: 11px; color: var(--state-complete); }
+	.token-copy-row { display: flex; gap: var(--sp-2); }
+	.token-value {
+		flex: 1; padding: 6px 10px; background: var(--surface-3);
+		border: 1px solid var(--border); border-radius: var(--radius-sm);
+		color: var(--text-primary); font-size: 11px; outline: none;
+	}
+	.btn-copy {
+		padding: 6px 10px; font-size: 10px; letter-spacing: 0.06em;
+		background: none; border: 1px solid var(--accent-dim);
+		border-radius: var(--radius-sm); color: var(--accent); cursor: pointer;
+	}
+	.btn-copy:hover { background: var(--accent-muted); }
+
+	.code-block {
+		display: flex; flex-direction: column; gap: 4px;
+	}
+	.code-label { font-size: 10px; color: var(--text-tertiary); letter-spacing: 0.08em; }
+	.code {
+		padding: var(--sp-3); background: var(--surface-0);
+		border: 1px solid var(--border); border-radius: var(--radius-sm);
+		font-size: 11px; color: var(--text-secondary); overflow-x: auto;
+		white-space: pre; line-height: 1.6;
+	}
+
+	.token-list { display: flex; flex-direction: column; gap: var(--sp-2); }
+	.token-row {
+		display: flex; align-items: center; gap: var(--sp-3);
+		padding: var(--sp-2) var(--sp-3); background: var(--surface-3);
+		border-radius: var(--radius-sm);
+	}
+	.token-row.revoked { opacity: 0.5; }
+	.token-preview { font-size: 11px; color: var(--text-tertiary); min-width: 80px; }
+	.token-name { flex: 1; font-size: 13px; color: var(--text-primary); }
+	.token-status { font-size: 9px; letter-spacing: 0.06em; padding: 2px 6px; border-radius: 3px; }
+	.token-status.connected { background: rgba(93, 216, 121, 0.12); color: var(--state-complete); }
+	.token-status.unused { background: rgba(255, 242, 3, 0.12); color: var(--accent); }
+	.token-status.revoked-badge { background: rgba(117, 117, 117, 0.12); color: var(--state-cancelled); }
+	.btn-revoke {
+		font-size: 9px; letter-spacing: 0.06em; padding: 2px 8px;
+		background: none; border: 1px solid rgba(255, 82, 82, 0.3);
+		border-radius: 3px; color: var(--state-error); cursor: pointer;
+	}
+	.btn-revoke:hover { background: rgba(255, 82, 82, 0.1); }
 </style>

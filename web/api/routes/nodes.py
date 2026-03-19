@@ -23,17 +23,46 @@ from ..ws import manager
 
 logger = logging.getLogger(__name__)
 
-# Shared secret auth — set CK_AUTH_TOKEN on the server to require it
+# Legacy shared secret — set CK_AUTH_TOKEN for backward compatibility
 _AUTH_TOKEN = os.environ.get("CK_AUTH_TOKEN", "")
 
 
 def _check_node_auth(request: Request) -> None:
-    """Verify Bearer token if CK_AUTH_TOKEN is set on the server."""
-    if not _AUTH_TOKEN:
-        return  # no token configured, allow all
+    """Verify node auth via per-node token or legacy shared secret.
+
+    Checks in order:
+    1. Per-node token (from node_tokens store) — sets request.state.node_org_id
+    2. Legacy CK_AUTH_TOKEN shared secret
+    3. If neither is configured, allow all (backward compat)
+    """
     auth = request.headers.get("Authorization", "")
-    if auth != f"Bearer {_AUTH_TOKEN}":
-        raise HTTPException(status_code=401, detail="Invalid or missing auth token")
+    bearer = auth[7:] if auth.startswith("Bearer ") else ""
+
+    if bearer:
+        # Check per-node tokens first
+        from ..node_tokens import get_node_token_store
+
+        store = get_node_token_store()
+        node_token = store.validate(bearer)
+        if node_token:
+            # Valid per-node token — store org_id for registration
+            request.state.node_org_id = node_token.org_id
+            request.state.node_token = bearer
+            return
+
+        # Check legacy shared secret
+        if _AUTH_TOKEN and bearer == _AUTH_TOKEN:
+            request.state.node_org_id = None
+            request.state.node_token = None
+            return
+
+    # No bearer token at all
+    if not _AUTH_TOKEN:
+        request.state.node_org_id = None
+        request.state.node_token = None
+        return  # no auth configured, allow all
+
+    raise HTTPException(status_code=401, detail="Invalid or missing node auth token")
 
 
 router = APIRouter(prefix="/api/nodes", tags=["nodes"], dependencies=[Depends(_check_node_auth)])
@@ -110,8 +139,10 @@ class JobResultRequest(BaseModel):
 
 
 @router.post("/register")
-def register_node(req: NodeRegisterRequest):
+def register_node(req: NodeRegisterRequest, request: Request):
     """Register a new worker node or update an existing one."""
+    # Resolve org_id: per-node token takes priority, then request body
+    org_id = getattr(request.state, "node_org_id", None) or req.org_id
     gpu_slots = [
         GPUSlot(index=g.index, name=g.name, vram_total_gb=g.vram_total_gb, vram_free_gb=g.vram_free_gb)
         for g in req.gpus
@@ -126,10 +157,15 @@ def register_node(req: NodeRegisterRequest):
         vram_free_gb=req.vram_free_gb,
         capabilities=req.capabilities,
         shared_storage=req.shared_storage,
-        org_id=req.org_id,
+        org_id=org_id,
         accepted_types=req.accepted_types,
     )
     registry.register(info)
+    # Associate the per-node token with this node_id
+    node_token = getattr(request.state, "node_token", None)
+    if node_token:
+        from ..node_tokens import get_node_token_store
+        get_node_token_store().mark_used_by_node(node_token, req.node_id)
     # Re-fetch to get the merged state (register preserves UI-set fields on re-register)
     node = registry.get_node(req.node_id)
     if node:

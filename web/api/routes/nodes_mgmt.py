@@ -18,6 +18,7 @@ from pydantic import BaseModel
 
 from ..auth import AUTH_ENABLED, UserContext, get_current_user
 from ..database import get_storage
+from ..node_tokens import get_node_token_store
 from ..nodes import NodeInfo, NodeSchedule, registry
 from ..orgs import get_org_store
 from ..tier_guard import require_member
@@ -220,3 +221,96 @@ def unregister_node(node_id: str, request: Request):
     registry.unregister(node_id)
     manager.send_node_offline(node_id)
     return {"status": "unregistered"}
+
+
+# --- Node Tokens (per-node auth) ---
+
+
+class GenerateTokenRequest(BaseModel):
+    org_id: str
+    label: str
+
+
+@router.post("/tokens")
+def generate_node_token(req: GenerateTokenRequest, request: Request):
+    """Generate a per-node auth token for an org. Requires org admin."""
+    user = _get_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    org_store = get_org_store()
+    org = org_store.get_org(req.org_id)
+    if not org:
+        raise HTTPException(status_code=404, detail="Org not found")
+    if not user.is_admin and not org_store.is_org_admin(req.org_id, user.user_id):
+        raise HTTPException(status_code=403, detail="Only org admins can generate node tokens")
+    token_store = get_node_token_store()
+    token = token_store.generate(org_id=req.org_id, label=req.label, created_by=user.user_id)
+    # Return the full token only on creation — never again
+    return token.to_dict()
+
+
+@router.get("/tokens")
+def list_node_tokens(request: Request, org_id: str | None = None):
+    """List node tokens. Org admins see their org's tokens. Platform admins see all."""
+    user = _get_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    token_store = get_node_token_store()
+    if user.is_admin and not org_id:
+        tokens = token_store.list_all()
+    elif org_id:
+        org_store = get_org_store()
+        if not user.is_admin and not org_store.is_org_admin(org_id, user.user_id):
+            raise HTTPException(status_code=403, detail="Only org admins can view tokens")
+        tokens = token_store.list_for_org(org_id)
+    else:
+        # List tokens for all orgs the user is admin of
+        org_store = get_org_store()
+        user_orgs = org_store.list_user_orgs(user.user_id)
+        tokens = []
+        for o in user_orgs:
+            if org_store.is_org_admin(o.org_id, user.user_id):
+                tokens.extend(token_store.list_for_org(o.org_id))
+    return {"tokens": [t.to_safe_dict() for t in tokens]}
+
+
+@router.delete("/tokens/{token_preview}")
+def revoke_node_token(token_preview: str, request: Request):
+    """Revoke a node token by its preview (first 8 chars). Requires org admin."""
+    user = _get_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    token_store = get_node_token_store()
+    # Find the full token by preview
+    all_tokens = token_store.list_all()
+    target = next((t for t in all_tokens if t.token[:8] == token_preview), None)
+    if not target:
+        raise HTTPException(status_code=404, detail="Token not found")
+    # Check org admin permission
+    if not user.is_admin:
+        org_store = get_org_store()
+        if not org_store.is_org_admin(target.org_id, user.user_id):
+            raise HTTPException(status_code=403, detail="Only org admins can revoke tokens")
+    token_store.revoke(target.token)
+    return {"status": "revoked"}
+
+
+@router.get("/setup")
+def get_node_setup_info(request: Request):
+    """Return info needed for the node setup guide.
+
+    Returns the server URL and image tag. The actual auth token
+    is generated separately via POST /tokens.
+    """
+    return {
+        "main_url": request.url.scheme + "://" + request.url.netloc,
+        "image": "ghcr.io/jamesnyevrguy/corridorkey-node:stable",
+        "compose_template": "docker-compose.node.yml",
+        "env_vars": {
+            "CK_MAIN_URL": {"required": True, "desc": "Main server URL"},
+            "CK_AUTH_TOKEN": {"required": True, "desc": "Node auth token (generate above)"},
+            "CK_NODE_NAME": {"required": False, "desc": "Display name for this node"},
+            "CK_NODE_GPUS": {"required": False, "desc": "'auto', '0', or '0,1'"},
+            "CK_SHARED_STORAGE": {"required": False, "desc": "Shared mount path (skip HTTP transfer)"},
+        },
+    }
