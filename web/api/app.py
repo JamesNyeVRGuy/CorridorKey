@@ -28,6 +28,29 @@ logger = logging.getLogger(__name__)
 _app_start_time = 0.0
 
 
+def _track_consumed_credits(queue) -> None:
+    """Track GPU-seconds consumed by the most recently completed job (CRKY-6)."""
+    import time as _t
+
+    try:
+        history = queue.history_snapshot
+        if not history:
+            return
+        # Most recent completed job
+        job = history[-1]
+        if job.status.value != "completed" or not job.org_id or not job.started_at:
+            return
+        elapsed = _t.time() - job.started_at
+        if elapsed <= 0:
+            return
+        from .gpu_credits import add_consumed
+
+        add_consumed(job.org_id, elapsed)
+        logger.debug(f"Tracked {elapsed:.1f}s consumed GPU time for org {job.org_id}")
+    except Exception as e:
+        logger.debug(f"Credit tracking failed: {e}")
+
+
 def _save_history_snapshot(queue) -> None:
     """Serialize and persist the job history."""
     history = queue.history_snapshot
@@ -120,9 +143,11 @@ async def lifespan(app: FastAPI):
             queue._history.append(job)
         logger.info(f"Restored {len(saved_history)} jobs from history")
 
-    # Save history whenever a job finishes
+    # Save history and track GPU credits whenever a job finishes
     def _persist_history(_clip_name: str) -> None:
         _save_history_snapshot(queue)
+        # Track consumed GPU-seconds for the completing job (CRKY-6)
+        _track_consumed_credits(queue)
 
     def _persist_history_err(_clip_name: str, _error: str) -> None:
         _save_history_snapshot(queue)

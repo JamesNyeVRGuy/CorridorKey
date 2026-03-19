@@ -184,3 +184,21 @@ def update_member_role(org_id: str, member_user_id: str, req: UpdateRoleRequest,
     if not result:
         raise HTTPException(status_code=404, detail="User is not a member of this org")
     return result.to_dict()
+
+
+# --- GPU Credits (CRKY-6) ---
+
+
+@router.get("/{org_id}/credits", dependencies=[Depends(require_authenticated)])
+def get_credits(org_id: str, request: Request):
+    """Get GPU credit balance for an org. Must be a member."""
+    user = _get_user(request)
+    store = get_org_store()
+    if not store.get_org(org_id):
+        raise HTTPException(status_code=404, detail="Org not found")
+    if not user.is_admin and not store.is_member(org_id, user.user_id):
+        raise HTTPException(status_code=403, detail="Not a member of this org")
+    from ..gpu_credits import get_org_credits
+
+    credits = get_org_credits(org_id)
+    return credits.to_dict()
