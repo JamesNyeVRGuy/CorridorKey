@@ -81,12 +81,12 @@ class LocalStorage(FileStorage):
     """
 
     def __init__(self, base_dir: str):
-        self._base = os.path.abspath(base_dir)
+        self._base = os.path.realpath(base_dir)
 
     def _resolve(self, key: str) -> str:
-        """Resolve a key to an absolute path, preventing traversal."""
-        path = os.path.normpath(os.path.join(self._base, key))
-        if not path.startswith(self._base):
+        """Resolve a key to an absolute path, preventing traversal and symlink escape."""
+        path = os.path.realpath(os.path.join(self._base, key))
+        if path != self._base and not path.startswith(self._base + os.sep):
             raise ValueError(f"Path traversal detected: {key}")
         return path
 

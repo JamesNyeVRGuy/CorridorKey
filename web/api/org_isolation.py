@@ -98,7 +98,8 @@ def validate_clip_access(request: Request, clip_root_path: str) -> bool:
 
     for org in user_orgs:
         org_dir = os.path.join(abs_base, org.org_id)
-        if abs_clip.startswith(org_dir):
+        # Use os.sep suffix to prevent prefix collision (e.g., org_id "abc" matching "abcdef/")
+        if abs_clip == org_dir or abs_clip.startswith(org_dir + os.sep):
             return True
 
     raise HTTPException(status_code=403, detail="You don't have access to this clip's organization")
