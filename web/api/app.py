@@ -388,9 +388,12 @@ def create_app() -> FastAPI:
             if path.startswith("api/") or path == "ws":
                 return
             # Serve actual static files if they exist (favicon, etc.)
-            file_path = os.path.join(static_dir, path)
-            if path and os.path.isfile(file_path):
-                return FileResponse(file_path)
+            # Use realpath to prevent path traversal (e.g., ../../etc/passwd)
+            if path:
+                file_path = os.path.realpath(os.path.join(static_dir, path))
+                static_real = os.path.realpath(static_dir)
+                if file_path.startswith(static_real + os.sep) and os.path.isfile(file_path):
+                    return FileResponse(file_path)
             return FileResponse(index_html)
     else:
         logger.warning(f"SPA build directory not found at {static_dir} — serving API only")

@@ -234,7 +234,9 @@ def get_preview_video(clip_name: str, pass_name: str, request: Request, fps: int
         with open(concat_path, "w") as f:
             for fname in files:
                 fpath = os.path.join(target_dir, fname)
-                f.write(f"file '{fpath}'\n")
+                # Escape special chars for ffmpeg concat format (backslash, single quote, newline)
+                escaped = fpath.replace("\\", "\\\\").replace("'", "'\\''").replace("\n", "")
+                f.write(f"file '{escaped}'\n")
                 f.write(f"duration {1 / fps}\n")
 
         is_exr = files[0].lower().endswith(".exr")
