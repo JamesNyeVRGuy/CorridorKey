@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import os
 
+from .version import VERSION_STRING
+
 # Determine docs access mode
 _AUTH_ENABLED = os.environ.get("CK_AUTH_ENABLED", "false").strip().lower() in ("true", "1", "yes")
 _DOCS_PUBLIC_OVERRIDE = os.environ.get("CK_DOCS_PUBLIC", "").strip()
@@ -22,8 +24,7 @@ else:
     # Public by default in local mode, protected in production
     DOCS_PUBLIC = not _AUTH_ENABLED
 
-
-API_VERSION = "1.0.0"
+API_VERSION = VERSION_STRING
 
 API_DESCRIPTION = """
 # CorridorKey Cloud API

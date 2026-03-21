@@ -284,6 +284,14 @@ def create_app() -> FastAPI:
     else:
         logger.info("API docs publicly accessible at /docs and /redoc")
 
+    # Server version (public)
+    @app.get("/api/version")
+    def get_version():
+        """Return the server version string. No auth required."""
+        from .version import API_VERSION, BUILD_COMMIT, VERSION_STRING
+
+        return {"version": VERSION_STRING, "api": API_VERSION, "commit": BUILD_COMMIT}
+
     # Health check (CRKY-21)
     @app.get("/api/health")
     def health_check():

@@ -96,7 +96,7 @@ class TestPublicDocs:
         assert "openapi" in schema
         assert "info" in schema
         assert schema["info"]["title"] == "CorridorKey API"
-        assert schema["info"]["version"] == "1.0.0"
+        assert "1.0.0" in schema["info"]["version"]
 
     def test_openapi_has_tags(self, public_docs_app):
         resp = public_docs_app.get("/openapi.json")
@@ -172,7 +172,7 @@ class TestAPIVersionHeader:
     def test_api_endpoints_have_version_header(self, public_docs_app):
         resp = public_docs_app.get("/api/health")
         assert "X-API-Version" in resp.headers
-        assert resp.headers["X-API-Version"] == "1.0.0"
+        assert "1.0.0" in resp.headers["X-API-Version"]
 
     def test_non_api_endpoints_no_version_header(self, public_docs_app):
         # SPA fallback routes shouldn't have the version header
@@ -184,7 +184,7 @@ class TestAPIVersionHeader:
     def test_docs_endpoints_have_version_header(self, public_docs_app):
         resp = public_docs_app.get("/openapi.json")
         assert "X-API-Version" in resp.headers
-        assert resp.headers["X-API-Version"] == "1.0.0"
+        assert "1.0.0" in resp.headers["X-API-Version"]
 
 
 class TestHealthEndpointUnchanged:

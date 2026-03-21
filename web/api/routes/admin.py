@@ -312,6 +312,57 @@ def get_user_activity(user_id: str):
     }
 
 
+# --- Server version ---
+
+
+@router.get("/version")
+def get_server_version():
+    """Server version and build info. Platform admin only."""
+    from ..version import API_VERSION, BUILD_COMMIT, VERSION_STRING
+
+    return {
+        "version": VERSION_STRING,
+        "api_version": API_VERSION,
+        "build_commit": BUILD_COMMIT,
+    }
+
+
+# --- Server logs ---
+
+
+@router.get("/logs")
+def get_server_logs(lines: int = 200):
+    """View recent server log output. Platform admin only.
+
+    Reads from the structured log buffer if JSON logging is enabled,
+    otherwise reads the last N lines from stderr/stdout capture.
+    Safe for remote admin access — no shell, no file paths exposed.
+    """
+    from ..logging_config import LOG_FORMAT
+
+    if LOG_FORMAT == "json":
+        # Read from Python's root logger handlers
+        import json as _json
+
+        entries = []
+        for handler in logging.root.handlers:
+            if hasattr(handler, "stream") and hasattr(handler.stream, "getvalue"):
+                # StringIO-backed handler (unlikely in production)
+                raw = handler.stream.getvalue()
+                for line in raw.strip().split("\n")[-lines:]:
+                    try:
+                        entries.append(_json.loads(line))
+                    except Exception:
+                        entries.append({"msg": line})
+        if entries:
+            return {"format": "json", "entries": entries[-lines:]}
+
+    # Fallback: read from the in-memory log ring buffer
+    from ..log_buffer import get_recent_logs
+
+    return {"format": "text", "entries": get_recent_logs(lines)}
+
+
 # --- Audit log ---
 
 

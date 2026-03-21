@@ -12,13 +12,14 @@ import pytest
 class TestOpenAPIConfig:
     """Test the OpenAPI configuration module."""
 
-    def test_api_version_is_semver(self):
+    def test_api_version_format(self):
         from web.api.openapi_config import API_VERSION
 
-        parts = API_VERSION.split(".")
+        # Format: "1.0.0+commithash" or "1.0.0+dev"
+        assert "+" in API_VERSION or API_VERSION.count(".") == 2
+        base = API_VERSION.split("+")[0]
+        parts = base.split(".")
         assert len(parts) == 3
-        for p in parts:
-            assert p.isdigit()
 
     def test_api_description_not_empty(self):
         from web.api.openapi_config import API_DESCRIPTION
@@ -95,7 +96,7 @@ class TestAPIVersionMiddleware:
     def test_middleware_imports_version(self):
         from web.api.api_version import API_VERSION
 
-        assert API_VERSION == "1.0.0"
+        assert "1.0.0" in API_VERSION
 
 
 class TestDocsRoutes:
@@ -240,7 +241,7 @@ class TestAPIVersionHeader:
     def test_version_constant(self):
         from web.api.openapi_config import API_VERSION
 
-        assert API_VERSION == "1.0.0"
+        assert API_VERSION == "1.0.0" or "1.0.0" in API_VERSION
 
     def test_middleware_dispatches(self):
         """The middleware should add X-API-Version to API responses."""

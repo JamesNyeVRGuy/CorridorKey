@@ -67,3 +67,8 @@ def configure_logging() -> None:
             level=level,
             format="%(asctime)s %(name)s %(levelname)s %(message)s",
         )
+
+    # Install the in-memory log buffer for admin remote log viewing
+    from .log_buffer import install as _install_buffer
+
+    _install_buffer()

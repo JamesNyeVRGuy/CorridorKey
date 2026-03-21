@@ -43,8 +43,10 @@ RUN mkdir -p /app/Projects && chown appuser:appuser /app/Projects
 
 USER appuser
 
+ARG BUILD_COMMIT=dev
 ENV OPENCV_IO_ENABLE_OPENEXR=1
 ENV CK_CLIPS_DIR=/app/Projects
+ENV CK_BUILD_COMMIT=${BUILD_COMMIT}
 
 EXPOSE 3000
 

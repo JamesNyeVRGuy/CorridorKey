@@ -61,6 +61,8 @@ RUN mkdir -p CorridorKeyModule/checkpoints \
 # Run as non-root
 USER nodeuser
 
+ARG BUILD_COMMIT=dev
+ENV CK_BUILD_COMMIT=${BUILD_COMMIT}
 ENV CK_MAIN_URL=http://localhost:3000
 ENV CK_NODE_NAME=docker-node
 ENV CK_NODE_GPUS=auto
