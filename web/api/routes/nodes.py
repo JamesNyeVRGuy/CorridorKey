@@ -629,24 +629,27 @@ async def upload_result_bundle(node_id: str, clip_name: str, pass_name: str, req
     target_dir = os.path.join(clip.root_path, subdir)
     os.makedirs(target_dir, exist_ok=True)
 
-    # Read the tar stream from the request body (limit 2GB to prevent memory exhaustion)
-    max_tar_bytes = 2 * 1024 * 1024 * 1024
-    body = await request.body()
-    if len(body) > max_tar_bytes:
-        raise HTTPException(status_code=413, detail="Tar bundle too large (max 2GB)")
-    buf = io.BytesIO(body)
+    # Stream the request body to a temp file to avoid holding the entire
+    # tar in memory. No size limit — disk is cheaper than RAM.
+    import tempfile as _tempfile
+
     count = 0
     try:
-        with tarfile.open(fileobj=buf, mode="r|") as tar:
-            for member in tar:
-                if member.isfile():
-                    # Validate path stays within target_dir
-                    dest = safe_join(target_dir, os.path.basename(member.name))
-                    extracted = tar.extractfile(member)
-                    if extracted:
-                        with open(dest, "wb") as f:
-                            f.write(extracted.read())
-                        count += 1
+        with _tempfile.SpooledTemporaryFile(max_size=64 * 1024 * 1024) as tmp:
+            # Stream body chunks to temp file (spills to disk above 64MB)
+            async for chunk in request.stream():
+                tmp.write(chunk)
+            tmp.seek(0)
+
+            with tarfile.open(fileobj=tmp, mode="r|") as tar:
+                for member in tar:
+                    if member.isfile():
+                        dest = safe_join(target_dir, os.path.basename(member.name))
+                        extracted = tar.extractfile(member)
+                        if extracted:
+                            with open(dest, "wb") as f:
+                                f.write(extracted.read())
+                            count += 1
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid tar stream: {e}") from e
 
