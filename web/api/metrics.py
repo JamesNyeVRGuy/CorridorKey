@@ -26,7 +26,7 @@ import os
 import shutil
 import time
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from fastapi.responses import PlainTextResponse
 
 from .deps import get_queue
@@ -60,11 +60,23 @@ def _labeled_metric(name: str, value: float | int, labels: str) -> str:
     return f"{name}{{{labels}}} {value}\n"
 
 
+# Optional bearer token for metrics endpoint security.
+# Set CK_METRICS_TOKEN to require authentication on /metrics.
+# Prometheus scrape config: authorization: {type: Bearer, credentials: <token>}
+_METRICS_TOKEN = os.environ.get("CK_METRICS_TOKEN", "").strip()
+
+
 @router.get("/metrics", response_class=PlainTextResponse)
-def prometheus_metrics():
+def prometheus_metrics(request: Request):
     """Export metrics in Prometheus text exposition format."""
     if not METRICS_ENABLED:
         return PlainTextResponse("# Metrics disabled. Set CK_METRICS_ENABLED=true\n", status_code=200)
+
+    # Token auth for metrics (optional — set CK_METRICS_TOKEN to enable)
+    if _METRICS_TOKEN:
+        auth = request.headers.get("Authorization", "")
+        if auth != f"Bearer {_METRICS_TOKEN}":
+            return PlainTextResponse("Unauthorized\n", status_code=401)
 
     lines: list[str] = []
 

@@ -13,6 +13,10 @@ rule_files:
 scrape_configs:
   - job_name: corridorkey
     metrics_path: /metrics
+    # Uncomment if CK_METRICS_TOKEN is set on the web server:
+    # authorization:
+    #   type: Bearer
+    #   credentials: "your-metrics-token-here"
     static_configs:
       - targets:
           - corridorkey-web:3000
