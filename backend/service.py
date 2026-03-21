@@ -66,6 +66,27 @@ else:
     BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
+def _download_hf_repo(repo_id: str, target_dir: str) -> None:
+    """Download a HuggingFace repo to a local directory.
+
+    Used as a fallback when weight sync from the main server fails.
+    Works independently — nodes don't need the server to be up.
+    """
+    try:
+        from huggingface_hub import snapshot_download
+
+        os.makedirs(target_dir, exist_ok=True)
+        snapshot_download(
+            repo_id=repo_id,
+            local_dir=target_dir,
+            local_dir_use_symlinks=False,
+        )
+        logger.info(f"Downloaded {repo_id} to {target_dir}")
+    except Exception as e:
+        logger.error(f"Failed to download {repo_id} from HuggingFace: {e}")
+        raise
+
+
 class _ActiveModel(Enum):
     """Tracks which heavy model is currently loaded in VRAM."""
 
@@ -314,6 +335,12 @@ class CorridorKeyService:
 
         from gvm_core import GVMProcessor
 
+        # Auto-download GVM weights from HuggingFace if missing
+        gvm_weights = os.path.join(BASE_DIR, "gvm_core", "weights")
+        if not os.path.isfile(os.path.join(gvm_weights, "unet", "config.json")):
+            logger.info("GVM weights not found — downloading from HuggingFace (geyongtao/gvm)...")
+            _download_hf_repo("geyongtao/gvm", gvm_weights)
+
         logger.info("Loading GVM processor...")
         t0 = time.monotonic()
         self._gvm_processor = GVMProcessor(device=self._device)
@@ -328,6 +355,13 @@ class CorridorKeyService:
             return self._videomama_pipeline
 
         sys.path.insert(0, os.path.join(BASE_DIR, "VideoMaMaInferenceModule"))
+
+        # Auto-download VideoMaMa weights from HuggingFace if missing
+        vm_weights = os.path.join(BASE_DIR, "VideoMaMaInferenceModule", "checkpoints", "VideoMaMa")
+        if not os.path.isdir(vm_weights) or not os.listdir(vm_weights):
+            logger.info("VideoMaMa weights not found — downloading from HuggingFace (SammyLim/VideoMaMa)...")
+            _download_hf_repo("SammyLim/VideoMaMa", vm_weights)
+
         from VideoMaMaInferenceModule.inference import load_videomama_model
 
         logger.info("Loading VideoMaMa pipeline...")

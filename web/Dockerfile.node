@@ -25,33 +25,38 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies (as root, before copying source)
+# Install Python dependencies (as root, cacheable — only changes when pyproject.toml/uv.lock change)
 COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --extra cuda --no-install-project
 
-# Copy project source code (weights excluded via .dockerignore, auto-synced at runtime)
-COPY backend/ backend/
-COPY device_utils.py ./
-COPY CorridorKeyModule/ CorridorKeyModule/
-COPY gvm_core/ gvm_core/
-COPY VideoMaMaInferenceModule/ VideoMaMaInferenceModule/
-COPY BiRefNetModule/ BiRefNetModule/
-COPY web/__init__.py web/__init__.py
-COPY web/shared/ web/shared/
-COPY web/node/ web/node/
-COPY README.md ./
+# Copy project source code with nodeuser ownership (avoids expensive chown layer)
+COPY --chown=nodeuser:nodeuser backend/ backend/
+COPY --chown=nodeuser:nodeuser device_utils.py ./
+COPY --chown=nodeuser:nodeuser CorridorKeyModule/ CorridorKeyModule/
+COPY --chown=nodeuser:nodeuser gvm_core/ gvm_core/
+COPY --chown=nodeuser:nodeuser VideoMaMaInferenceModule/ VideoMaMaInferenceModule/
+COPY --chown=nodeuser:nodeuser BiRefNetModule/ BiRefNetModule/
+COPY --chown=nodeuser:nodeuser web/__init__.py web/__init__.py
+COPY --chown=nodeuser:nodeuser web/shared/ web/shared/
+COPY --chown=nodeuser:nodeuser web/node/ web/node/
+COPY --chown=nodeuser:nodeuser README.md ./
 
-# Install the project itself (still as root)
+# Install the project itself
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --extra cuda
 
-# Create dirs and transfer ownership AFTER all installs are done
+# Ensure checkpoint and temp dirs exist with correct ownership
 RUN mkdir -p CorridorKeyModule/checkpoints \
     gvm_core/weights \
     VideoMaMaInferenceModule/checkpoints/VideoMaMa \
     /tmp/ck-work && \
-    chown -R nodeuser:nodeuser /app /tmp/ck-work
+    chown -R nodeuser:nodeuser \
+    CorridorKeyModule/checkpoints \
+    gvm_core/weights \
+    VideoMaMaInferenceModule/checkpoints/VideoMaMa \
+    /tmp/ck-work \
+    .venv/lib/python3.11/site-packages/corridorkey-1.0.0.dist-info
 
 # Run as non-root
 USER nodeuser
@@ -61,5 +66,4 @@ ENV CK_NODE_NAME=docker-node
 ENV CK_NODE_GPUS=auto
 ENV CK_TEMP_DIR=/tmp/ck-work
 
-# Use the venv python directly — don't let uv try to sync/modify the venv
 CMD ["/app/.venv/bin/python", "-m", "web.node"]
