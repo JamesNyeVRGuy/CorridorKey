@@ -177,6 +177,9 @@ def register_node(req: NodeRegisterRequest, request: Request):
 @router.post("/{node_id}/heartbeat")
 def node_heartbeat(node_id: str, req: NodeHeartbeatRequest):
     """Update node heartbeat and VRAM status."""
+    # 410 Gone = node was explicitly removed via UI, agent should shut down
+    if registry.is_dismissed(node_id):
+        raise HTTPException(status_code=410, detail="Node was removed — shutting down")
     if not registry.heartbeat(node_id, req.vram_free_gb, req.status):
         raise HTTPException(status_code=404, detail=f"Node '{node_id}' not registered")
     node = registry.get_node(node_id)
@@ -195,8 +198,8 @@ def node_heartbeat(node_id: str, req: NodeHeartbeatRequest):
 
 @router.delete("/{node_id}")
 def unregister_node(node_id: str):
-    registry.unregister(node_id)
     node = registry.get_node(node_id)
+    registry.unregister(node_id, dismiss=True)
     manager.send_node_offline(node_id, org_id=node.org_id if node else None)
     return {"status": "unregistered"}
 

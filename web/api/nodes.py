@@ -163,10 +163,18 @@ class NodeRegistry:
 
     def __init__(self):
         self._nodes: dict[str, NodeInfo] = {}
+        self._dismissed: set[str] = set()  # Node IDs explicitly removed via UI
         self._lock = threading.Lock()
+
+    def is_dismissed(self, node_id: str) -> bool:
+        """Check if a node was explicitly removed via the UI."""
+        with self._lock:
+            return node_id in self._dismissed
 
     def register(self, info: NodeInfo) -> None:
         with self._lock:
+            # Clear dismissed status on explicit re-registration
+            self._dismissed.discard(info.node_id)
             existing = self._nodes.get(info.node_id)
             if existing:
                 existing.name = info.name
@@ -201,11 +209,14 @@ class NodeRegistry:
             node.status = status
             return True
 
-    def unregister(self, node_id: str) -> None:
+    def unregister(self, node_id: str, dismiss: bool = False) -> None:
         with self._lock:
             if node_id in self._nodes:
                 logger.info(f"Node unregistered: {self._nodes[node_id].name} ({node_id})")
                 del self._nodes[node_id]
+            if dismiss:
+                self._dismissed.add(node_id)
+                logger.info(f"Node dismissed (will not auto-reconnect): {node_id}")
 
     def set_busy(self, node_id: str, job_id: str) -> None:
         with self._lock:

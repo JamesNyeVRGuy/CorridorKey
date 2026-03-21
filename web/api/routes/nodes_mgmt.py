@@ -235,7 +235,7 @@ def unregister_node(node_id: str, request: Request):
     """Remove a node — requires org admin."""
     node = _require_node_access(request, node_id, manage=True)
     oid = node.org_id
-    registry.unregister(node_id)
+    registry.unregister(node_id, dismiss=True)
     manager.send_node_offline(node_id, org_id=oid)
     return {"status": "unregistered"}
 

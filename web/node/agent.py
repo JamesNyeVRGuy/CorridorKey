@@ -40,6 +40,7 @@ class NodeAgent:
         self.file_transfer = FileTransfer(self.main_url, self.node_id, auth_token=config.AUTH_TOKEN)
 
         self._stop = threading.Event()
+        self._dismissed = False  # Set when server returns 410 (explicitly removed)
         self._gpu_indices = self._resolve_gpus()
         self._busy_gpus: set[int] = set()  # GPU indices currently processing
         self._busy_lock = threading.Lock()
@@ -157,6 +158,11 @@ class NodeAgent:
                     "cpu_stats": cpu.to_dict(),
                 },
             )
+            if r.status_code == 410:
+                # Node was explicitly removed via UI — shut down gracefully
+                logger.warning("Node was removed by an administrator — shutting down")
+                self._dismissed = True
+                return False
             if r.status_code == 404:
                 # Server restarted and lost our registration — re-register
                 logger.info("Server lost registration, re-registering...")
@@ -456,7 +462,7 @@ class NodeAgent:
 
         # Poll loop
         logger.info(f"Polling for jobs... ({len(self._gpu_indices)} GPU(s) available)")
-        while not self._stop.is_set():
+        while not self._stop.is_set() and not self._dismissed:
             # Check if we have an idle GPU
             with self._busy_lock:
                 idle_gpus = [g for g in self._gpu_indices if g not in self._busy_gpus]
@@ -482,9 +488,9 @@ class NodeAgent:
                 self._stop.wait(self.poll_interval)
 
     def _heartbeat_loop(self) -> None:
-        while not self._stop.is_set():
+        while not self._stop.is_set() and not self._dismissed:
             self._stop.wait(self.heartbeat_interval)
-            if not self._stop.is_set():
+            if not self._stop.is_set() and not self._dismissed:
                 self._heartbeat()
 
     def stop(self) -> None:
