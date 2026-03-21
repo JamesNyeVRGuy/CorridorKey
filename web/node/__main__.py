@@ -16,12 +16,46 @@ from .agent import NodeAgent
 from .log_buffer import install as install_log_buffer
 
 
+def _security_checks() -> None:
+    """Validate the runtime environment before starting."""
+    import os
+
+    log = logging.getLogger(__name__)
+
+    # Refuse to run as root (uid 0) unless explicitly overridden
+    if os.getuid() == 0 and not os.environ.get("CK_ALLOW_ROOT", "").strip():
+        log.error(
+            "Node agent is running as root (uid 0). This is a security risk. "
+            "Run as a non-root user, or set CK_ALLOW_ROOT=true to override."
+        )
+        sys.exit(1)
+
+    # Warn if temp directory is writable to others
+    temp_dir = os.environ.get("CK_TEMP_DIR", "/tmp/ck-work").strip()
+    if os.path.isdir(temp_dir):
+        import stat
+
+        mode = os.stat(temp_dir).st_mode
+        if mode & stat.S_IWOTH:
+            log.warning(f"Temp directory {temp_dir} is world-writable — consider restricting permissions")
+
+    # Warn about insecure HTTP (non-TLS) connections to the main server
+    main_url = config.MAIN_URL
+    if main_url.startswith("http://") and "localhost" not in main_url and "127.0.0.1" not in main_url:
+        log.warning(
+            f"Connecting to {main_url} over plain HTTP. Auth tokens are sent in cleartext. "
+            "Use HTTPS in production."
+        )
+
+
 def main() -> None:
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(name)s %(levelname)s %(message)s",
     )
     install_log_buffer()
+
+    _security_checks()
 
     if config.MAIN_URL == "http://localhost:3000":
         logging.getLogger(__name__).warning(
