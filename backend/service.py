@@ -828,6 +828,10 @@ class CorridorKeyService:
 
     # --- GVM Alpha Generation ---
 
+    # GVM concurrency: how many chunks to process in parallel on one GPU.
+    # Set via CK_GVM_CONCURRENCY env var. Default 1 (sequential).
+    _gvm_concurrency = int(os.environ.get("CK_GVM_CONCURRENCY", "1").strip())
+
     def run_gvm(
         self,
         clip: ClipEntry,
@@ -838,11 +842,13 @@ class CorridorKeyService:
         """Run GVM auto alpha generation for a clip.
 
         Transitions clip: RAW → READY (creates AlphaHint directory).
+        When CK_GVM_CONCURRENCY > 1, splits the input frames into chunks
+        and processes them in parallel threads on the same GPU.
 
         Args:
             clip: Must be in RAW state with input_asset.
             job: Optional GPUJob for cancel checking.
-            on_progress: Progress callback (GVM is monolithic, reports start/end).
+            on_progress: Progress callback.
             on_warning: Warning callback.
         """
         if clip.input_asset is None:
@@ -856,39 +862,15 @@ class CorridorKeyService:
         alpha_dir = os.path.join(clip.root_path, "AlphaHint")
         os.makedirs(alpha_dir, exist_ok=True)
 
-        if on_progress:
-            on_progress(clip.name, 0, 1)
+        # Get input frames
+        input_path = clip.input_asset.path
+        is_sequence = os.path.isdir(input_path)
 
-        # Check cancel before starting
-        if job and job.is_cancelled:
-            raise JobCancelledError(clip.name, 0)
-
-        # Per-batch progress callback — GVM iterates over frames internally
-        def _gvm_progress(batch_idx: int, total_batches: int) -> None:
-            if on_progress:
-                on_progress(clip.name, batch_idx, total_batches)
-            # Check cancel between batches
-            if job and job.is_cancelled:
-                raise JobCancelledError(clip.name, batch_idx)
-
-        try:
-            gvm.process_sequence(
-                input_path=clip.input_asset.path,
-                output_dir=clip.root_path,
-                num_frames_per_batch=1,
-                decode_chunk_size=1,
-                denoise_steps=1,
-                mode="matte",
-                write_video=False,
-                direct_output_dir=alpha_dir,
-                progress_callback=_gvm_progress,
-            )
-        except JobCancelledError:
-            raise
-        except Exception as e:
-            if job and job.is_cancelled:
-                raise JobCancelledError(clip.name, 0) from None
-            raise CorridorKeyError(f"GVM failed for '{clip.name}': {e}") from e
+        concurrency = self._gvm_concurrency
+        if concurrency > 1 and is_sequence:
+            self._run_gvm_parallel(gvm, clip, input_path, alpha_dir, concurrency, job, on_progress, on_warning)
+        else:
+            self._run_gvm_single(gvm, clip, input_path, alpha_dir, job, on_progress, on_warning)
 
         # Refresh alpha asset
         clip.alpha_asset = ClipAsset(alpha_dir, "sequence")
@@ -905,6 +887,138 @@ class CorridorKeyService:
 
         elapsed = time.monotonic() - t_start
         logger.info(f"GVM complete for '{clip.name}': {clip.alpha_asset.frame_count} alpha frames in {elapsed:.1f}s")
+
+    def _run_gvm_single(self, gvm, clip, input_path, alpha_dir, job, on_progress, on_warning):
+        """Run GVM on all frames sequentially (default)."""
+        if on_progress:
+            on_progress(clip.name, 0, 1)
+
+        if job and job.is_cancelled:
+            raise JobCancelledError(clip.name, 0)
+
+        def _gvm_progress(batch_idx: int, total_batches: int) -> None:
+            if on_progress:
+                on_progress(clip.name, batch_idx, total_batches)
+            if job and job.is_cancelled:
+                raise JobCancelledError(clip.name, batch_idx)
+
+        try:
+            gvm.process_sequence(
+                input_path=input_path,
+                output_dir=clip.root_path,
+                num_frames_per_batch=1,
+                decode_chunk_size=1,
+                denoise_steps=1,
+                mode="matte",
+                write_video=False,
+                direct_output_dir=alpha_dir,
+                progress_callback=_gvm_progress,
+            )
+        except JobCancelledError:
+            raise
+        except Exception as e:
+            if job and job.is_cancelled:
+                raise JobCancelledError(clip.name, 0) from None
+            raise CorridorKeyError(f"GVM failed for '{clip.name}': {e}") from e
+
+    def _run_gvm_parallel(self, gvm, clip, input_path, alpha_dir, concurrency, job, on_progress, on_warning):
+        """Run GVM on frame chunks in parallel threads.
+
+        Splits the input directory into N temporary chunk directories,
+        runs GVM on each chunk in a separate thread (same GPU), and all
+        chunks write directly to alpha_dir (filenames are preserved).
+        """
+        import shutil
+        import tempfile
+
+        from .natural_sort import natsorted
+        from .project import is_image_file
+
+        # List and split input frames
+        all_frames = natsorted([f for f in os.listdir(input_path) if is_image_file(f)])
+        total_frames = len(all_frames)
+
+        if total_frames < concurrency * 2:
+            # Not enough frames to justify parallel — run single
+            logger.info(f"GVM: only {total_frames} frames, running single-threaded")
+            return self._run_gvm_single(gvm, clip, input_path, alpha_dir, job, on_progress, on_warning)
+
+        # Split frames into chunks
+        chunk_size = total_frames // concurrency
+        chunks: list[list[str]] = []
+        for i in range(concurrency):
+            start = i * chunk_size
+            end = total_frames if i == concurrency - 1 else (i + 1) * chunk_size
+            chunks.append(all_frames[start:end])
+
+        logger.info(f"GVM parallel: {total_frames} frames split into {len(chunks)} chunks "
+                     f"({', '.join(str(len(c)) for c in chunks)} frames each)")
+
+        # Create temp chunk directories with symlinks to input frames
+        chunk_dirs: list[str] = []
+        temp_base = tempfile.mkdtemp(prefix="ck-gvm-chunks-")
+        try:
+            for i, chunk_frames in enumerate(chunks):
+                chunk_dir = os.path.join(temp_base, f"chunk_{i}")
+                os.makedirs(chunk_dir)
+                for fname in chunk_frames:
+                    src = os.path.join(input_path, fname)
+                    dst = os.path.join(chunk_dir, fname)
+                    os.symlink(src, dst)
+                chunk_dirs.append(chunk_dir)
+
+            # Track progress across all chunks
+            progress_lock = threading.Lock()
+            completed_frames = [0]
+            errors: list[Exception] = []
+
+            def _process_chunk(chunk_idx: int, chunk_dir: str) -> None:
+                chunk_len = len(chunks[chunk_idx])
+
+                def _chunk_progress(batch_idx: int, total_batches: int) -> None:
+                    with progress_lock:
+                        completed_frames[0] += 1
+                        if on_progress:
+                            on_progress(clip.name, completed_frames[0], total_frames)
+                    if job and job.is_cancelled:
+                        raise JobCancelledError(clip.name, batch_idx)
+
+                try:
+                    gvm.process_sequence(
+                        input_path=chunk_dir,
+                        output_dir=clip.root_path,
+                        num_frames_per_batch=1,
+                        decode_chunk_size=1,
+                        denoise_steps=1,
+                        mode="matte",
+                        write_video=False,
+                        direct_output_dir=alpha_dir,
+                        progress_callback=_chunk_progress,
+                    )
+                    logger.info(f"GVM chunk {chunk_idx} complete ({chunk_len} frames)")
+                except JobCancelledError:
+                    raise
+                except Exception as e:
+                    logger.error(f"GVM chunk {chunk_idx} failed: {e}")
+                    errors.append(e)
+
+            # Launch threads
+            threads: list[threading.Thread] = []
+            for i, chunk_dir in enumerate(chunk_dirs):
+                t = threading.Thread(target=_process_chunk, args=(i, chunk_dir), name=f"gvm-chunk-{i}")
+                t.start()
+                threads.append(t)
+
+            # Wait for all chunks
+            for t in threads:
+                t.join()
+
+            if errors and not (job and job.is_cancelled):
+                raise CorridorKeyError(f"GVM parallel failed: {len(errors)} chunk(s) errored — {errors[0]}")
+
+        finally:
+            # Clean up temp chunk directories
+            shutil.rmtree(temp_base, ignore_errors=True)
 
     # --- VideoMaMa Alpha Generation ---
 

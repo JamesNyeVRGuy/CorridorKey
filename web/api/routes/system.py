@@ -193,6 +193,23 @@ def set_claim_delay_setting(seconds: float):
     return {"status": "ok", "seconds": seconds}
 
 
+@router.get("/gvm-concurrency")
+def get_gvm_concurrency():
+    """Get the GVM parallel chunk count."""
+    service = get_service()
+    return {"concurrency": service._gvm_concurrency}
+
+
+@router.post("/gvm-concurrency", dependencies=[Depends(require_admin)])
+def set_gvm_concurrency(concurrency: int):
+    """Set how many GVM chunks to process in parallel. Admin only."""
+    if concurrency < 1 or concurrency > 16:
+        raise HTTPException(status_code=400, detail="Concurrency must be 1-16")
+    service = get_service()
+    service._gvm_concurrency = concurrency
+    return {"status": "ok", "concurrency": concurrency}
+
+
 @router.post("/unload", dependencies=[Depends(require_admin)])
 def unload_engines():
     service = get_service()
