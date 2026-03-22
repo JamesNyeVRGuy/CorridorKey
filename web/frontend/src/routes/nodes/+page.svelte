@@ -377,20 +377,33 @@
 					</div>
 
 					<div class="code-block">
-						<span class="code-label mono">Docker Run</span>
-						<pre class="code mono">docker run --gpus all -d \
-  -e CK_MAIN_URL={setupInfo.main_url} \
-  -e CK_AUTH_TOKEN=&lt;paste token here&gt; \
-  -e CK_NODE_NAME=my-node \
-  {setupInfo.image}</pre>
-					</div>
+						<span class="code-label mono">Docker Compose (save as docker-compose.yml)</span>
+						<pre class="code mono">services:
+  corridorkey-node:
+    image: {setupInfo.image}
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    environment:
+      - CK_MAIN_URL={setupInfo.main_url}
+      - CK_AUTH_TOKEN=&lt;paste token here&gt;
+      - CK_NODE_NAME=my-node
+      - CK_NODE_GPUS=auto
+    volumes:
+      - ck-weights:/app/CorridorKeyModule/checkpoints
+      - ck-weights-gvm:/app/gvm_core/weights
+      - ck-weights-vm:/app/VideoMaMaInferenceModule/checkpoints
 
-					<div class="code-block">
-						<span class="code-label mono">Docker Compose — Hardened (untrusted nodes)</span>
-						<pre class="code mono"># For untrusted nodes: read-only fs, tmpfs frame I/O, dropped capabilities
-docker compose -f deploy/docker-compose.node-hardened.yml up -d
-# Frames processed in RAM only, no persistent disk access.
-# Set CK_MAIN_URL and CK_AUTH_TOKEN in deploy/.env first.</pre>
+volumes:
+  ck-weights:
+  ck-weights-gvm:
+  ck-weights-vm:</pre>
+						<p class="code-hint mono">docker compose up -d</p>
 					</div>
 				</div>
 
