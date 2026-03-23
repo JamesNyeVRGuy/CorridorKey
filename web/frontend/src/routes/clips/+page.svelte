@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
-	import { refreshClips } from '$lib/stores/clips';
+	import { clips, refreshClips } from '$lib/stores/clips';
 	import { activeOrgId } from '$lib/stores/orgs';
 	import { refreshJobs } from '$lib/stores/jobs';
 	import { autoExtractFrames, autoShard } from '$lib/stores/settings';
@@ -347,6 +347,23 @@
 	$effect(() => {
 		if ($activeOrgId && $activeOrgId !== _prevOrg) {
 			_prevOrg = $activeOrgId;
+			loadProjects();
+		}
+	});
+
+	// Reload projects when global clips store changes (WS clip:state_changed)
+	let _prevClipCount = $clips.length;
+	$effect(() => {
+		const current = $clips;
+		// Detect state changes by comparing serialized states
+		const changed = current.length !== _prevClipCount ||
+			current.some((c, i) => {
+				const prev = projects.flatMap(p => p.clips);
+				const match = prev.find(p => p.name === c.name);
+				return match && match.state !== c.state;
+			});
+		if (changed && !loading) {
+			_prevClipCount = current.length;
 			loadProjects();
 		}
 	});
