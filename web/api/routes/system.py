@@ -262,7 +262,7 @@ def get_weight_manifest(name: str):
         raise HTTPException(status_code=400, detail=f"Unknown weight set: {name}")
     files = _walk_files(root)
     total_bytes = sum(f["size"] for f in files)
-    return {"name": name, "root": root, "files": files, "total_bytes": total_bytes}
+    return {"name": name, "files": files, "total_bytes": total_bytes}
 
 
 @weights_router.get("/weights/{name}/file/{file_path:path}")

@@ -34,12 +34,16 @@ PUBLIC_PATHS = {
     "/api/auth/refresh",
     "/api/auth/callback",
     "/api/auth/status",
+    "/api/status",
     "/api/health",
     "/api/version",
     # /metrics is public for Prometheus scraping (same Docker network).
     # In production, restrict external access via reverse proxy (Caddy).
     "/metrics",
 }
+
+# Paths that bypass auth only for specific HTTP methods
+_PUBLIC_GET_ONLY = {"/api/auth/me"}
 
 
 def _init_docs_paths() -> None:
@@ -56,20 +60,14 @@ def _init_docs_paths() -> None:
 
 _init_docs_paths()
 
-# Path prefixes that don't require authentication
+# Path prefixes that don't require authentication.
+# Only include true prefixes here — exact paths belong in PUBLIC_PATHS.
 PUBLIC_PREFIXES = (
     "/_app/",  # SvelteKit static assets
     "/ws",  # WebSocket (has its own auth, CRKY-13)
-    "/api/auth/status",  # Auth status check
-    "/api/auth/login",  # Login proxy to GoTrue
-    "/api/auth/refresh",  # Token refresh proxy to GoTrue
-    "/api/auth/signup",  # Server-side signup
-    "/api/auth/invite/validate",  # Invite validation (pre-signup)
-    "/api/auth/invite/consume",  # Invite consumption (post-signup)
-    "/api/auth/me",  # Current user tier check (pending page polling)
+    "/api/auth/invite/",  # Invite validation + consumption (pre/post-signup)
     "/api/nodes/",  # Nodes use CK_AUTH_TOKEN, not JWT
     "/api/system/weights/",  # Weight sync for nodes
-    "/api/status",  # Public status page (CRKY-51)
 )
 
 
@@ -128,7 +126,7 @@ def require_tier(request: Request, min_tier: str) -> UserContext:
     try:
         user_level = TIER_HIERARCHY.index(user.tier)
     except ValueError:
-        raise HTTPException(status_code=403, detail=f"Unknown tier: {user.tier}") from None
+        raise HTTPException(status_code=403, detail="Insufficient permissions.") from None
     try:
         min_level = TIER_HIERARCHY.index(min_tier)
     except ValueError:
@@ -136,7 +134,7 @@ def require_tier(request: Request, min_tier: str) -> UserContext:
     if user_level < min_level:
         raise HTTPException(
             status_code=403,
-            detail=f"Requires {min_tier} tier or higher (you are {user.tier})",
+            detail=f"Insufficient permissions. Requires {min_tier} tier or higher.",
         )
     return user
 
@@ -149,7 +147,8 @@ def _decode_jwt(token: str) -> dict[str, Any]:
     except jwt.ExpiredSignatureError as e:
         raise HTTPException(status_code=401, detail="Token expired") from e
     except jwt.InvalidTokenError as e:
-        raise HTTPException(status_code=401, detail=f"Invalid token: {e}") from e
+        logger.debug(f"JWT validation failed: {e}")
+        raise HTTPException(status_code=401, detail="Invalid token") from e
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
@@ -177,6 +176,10 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 pass  # fall through to JWT validation below
             else:
                 return await call_next(request)
+
+        # Paths that bypass auth for GET only (e.g., /api/auth/me for pending page polling)
+        if path in _PUBLIC_GET_ONLY and request.method == "GET":
+            return await call_next(request)
 
         # Protected docs routes handle their own auth checks (CRKY-32).
         # Let the request through so the route handler can inspect request.state.user.
@@ -228,15 +231,34 @@ class AuthMiddleware(BaseHTTPMiddleware):
         app_metadata = claims.get("app_metadata", {})
 
         user_id = claims.get("sub", "")
+        if not user_id:
+            return JSONResponse(status_code=401, content={"detail": "Invalid token: missing subject"})
         email = claims.get("email", "")
+
+        jwt_tier = app_metadata.get("tier", "pending")
 
         request.state.user = UserContext(
             user_id=user_id,
             email=email,
-            tier=app_metadata.get("tier", "pending"),
+            tier=jwt_tier,
             org_ids=app_metadata.get("org_ids", []),
             raw_claims=claims,
         )
+
+        # Cross-check tier against local store — use the more restrictive tier.
+        # This ensures demoted users lose access immediately, not after token expiry.
+        if user_id:
+            try:
+                from .users import get_user_store as _get_user_store
+
+                local_user = _get_user_store().get_user(user_id)
+                if local_user and local_user.tier != jwt_tier:
+                    local_idx = TIER_HIERARCHY.index(local_user.tier) if local_user.tier in TIER_HIERARCHY else -1
+                    jwt_idx = TIER_HIERARCHY.index(jwt_tier) if jwt_tier in TIER_HIERARCHY else -1
+                    if local_idx < jwt_idx:
+                        request.state.user.tier = local_user.tier
+            except Exception:
+                pass  # Local store unavailable — fall back to JWT tier
 
         # Auto-register user in local store on first auth.
         # Handles users created via create-admin.sh or GoTrue admin API
@@ -273,6 +295,6 @@ class AuthMiddleware(BaseHTTPMiddleware):
                             add_contributed(personal_org.org_id, STARTER_CREDITS)
                         logger.info(f"Auto-created personal org for {email}")
             except Exception:
-                pass  # Non-critical — don't block the request
+                logger.warning(f"Auto-registration failed for {email}", exc_info=True)
 
         return await call_next(request)

@@ -176,10 +176,10 @@ class TestStatusSampler:
 class TestPublicAccess:
     """Test that status endpoints are publicly accessible."""
 
-    def test_status_in_public_prefixes(self):
-        from web.api.auth import PUBLIC_PREFIXES
+    def test_status_in_public_paths(self):
+        from web.api.auth import PUBLIC_PATHS
 
-        assert any(p.startswith("/api/status") for p in PUBLIC_PREFIXES)
+        assert "/api/status" in PUBLIC_PATHS
 
     def test_status_in_rate_limit_exemptions(self):
         from web.api.rate_limit import EXEMPT_PREFIXES
