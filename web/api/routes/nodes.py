@@ -100,10 +100,18 @@ def _check_node_identity(request: Request, node_id: str) -> None:
 router = APIRouter(prefix="/api/nodes", tags=["nodes"], dependencies=[Depends(_check_node_auth)])
 
 
-def _node_clips_dir(node_id: str) -> str:
-    """Resolve org-scoped clips dir for a node. Falls back to base clips dir."""
-    node = registry.get_node(node_id)
-    return resolve_node_clips_dir(node.org_id if node else None)
+def _node_clips_dir(node_id: str, org_id: str | None = None) -> str:
+    """Resolve org-scoped clips dir. Uses provided org_id (e.g., from job), falls back to node's org."""
+    if not org_id:
+        # Try to get org from node's current job (file endpoints don't have job context)
+        node = registry.get_node(node_id)
+        if node and node.current_job_id:
+            queue = get_queue()
+            job = queue.find_job_by_id(node.current_job_id)
+            if job and job.org_id:
+                return resolve_node_clips_dir(job.org_id)
+        org_id = node.org_id if node else None
+    return resolve_node_clips_dir(org_id)
 
 
 def _save_node_config(node_id: str, node: NodeInfo) -> None:
@@ -491,7 +499,7 @@ async def get_next_job(node_id: str, request: Request):
     # Build job payload with file info
     clip = None
     service = get_service()
-    clips = service.scan_clips(_node_clips_dir(node_id))
+    clips = service.scan_clips(_node_clips_dir(node_id, org_id=job.org_id))
     for c in clips:
         if c.name == job.clip_name:
             clip = c
@@ -587,7 +595,7 @@ def report_job_result(node_id: str, req: JobResultRequest, request: Request):
 
     if req.status == "completed":
         service = get_service()
-        _chain_next_pipeline_step(job, queue, _node_clips_dir(node_id), service)
+        _chain_next_pipeline_step(job, queue, _node_clips_dir(node_id, org_id=job.org_id), service)
 
     return {"status": "ok"}
 
