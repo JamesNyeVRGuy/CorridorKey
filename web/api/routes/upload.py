@@ -22,7 +22,7 @@ from ..deps import get_queue, get_service
 from ..org_isolation import resolve_clips_dir
 from ..path_security import safe_extract_zip
 from ..routes import clips as _clips_mod
-from ..storage_quota import check_storage_quota
+from ..storage_quota import check_storage_quota, finish_upload
 from ..tier_guard import require_member
 
 logger = logging.getLogger(__name__)
@@ -113,6 +113,7 @@ async def upload_video(file: UploadFile, request: Request, name: str | None = No
                     extract_jobs.append(job.id)
                     logger.info(f"Auto-queued extraction job {job.id} for '{clip.name}'")
 
+    finish_upload(request)
     return {
         "status": "ok",
         "project_dir": project_dir,
@@ -202,6 +203,7 @@ async def upload_frames(file: UploadFile, request: Request, name: str | None = N
     clips = service.scan_clips(resolve_clips_dir(request))
     new_clips = [c for c in clips if c.root_path.startswith(project_dir)]
 
+    finish_upload(request)
     return {
         "status": "ok",
         "project_dir": project_dir,
@@ -267,6 +269,7 @@ async def upload_alpha_hint(clip_name: str, file: UploadFile, request: Request):
     clips = service.scan_clips(resolve_clips_dir(request))
     updated = next((c for c in clips if c.name == clip_name), None)
 
+    finish_upload(request)
     return {
         "status": "ok",
         "clip": _clips_mod._clip_to_schema(updated) if updated else None,
@@ -331,6 +334,7 @@ async def upload_videomama_mask(clip_name: str, file: UploadFile, request: Reque
     clips = service.scan_clips(resolve_clips_dir(request))
     updated = next((c for c in clips if c.name == clip_name), None)
 
+    finish_upload(request)
     return {
         "status": "ok",
         "clip": _clips_mod._clip_to_schema(updated) if updated else None,

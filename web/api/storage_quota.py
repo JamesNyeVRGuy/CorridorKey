@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 
 from fastapi import HTTPException, Request
 
@@ -22,9 +23,24 @@ _GB = 1024**3
 DEFAULT_PERSONAL_QUOTA = int(os.environ.get("CK_QUOTA_PERSONAL_GB", "50").strip()) * _GB
 DEFAULT_TEAM_QUOTA = int(os.environ.get("CK_QUOTA_TEAM_GB", "200").strip()) * _GB
 
+# Disk usage cache: {org_id: (timestamp, bytes)}
+_usage_cache: dict[str, tuple[float, int]] = {}
+_CACHE_TTL = 30  # seconds — recompute at most every 30s
+# Max concurrent uploads per user
+_MAX_CONCURRENT_UPLOADS = int(os.environ.get("CK_MAX_CONCURRENT_UPLOADS", "3").strip())
+_active_uploads: dict[str, int] = {}  # {user_id: count}
+_upload_lock = threading.Lock()
+
 
 def get_org_disk_usage(org_id: str) -> int:
-    """Calculate total disk usage for an org in bytes."""
+    """Calculate total disk usage for an org in bytes. Cached for 30s."""
+    import time
+
+    now = time.time()
+    cached = _usage_cache.get(org_id)
+    if cached and now - cached[0] < _CACHE_TTL:
+        return cached[1]
+
     base = get_base_clips_dir()
     if not base:
         return 0
@@ -38,7 +54,13 @@ def get_org_disk_usage(org_id: str) -> int:
                 total += os.path.getsize(os.path.join(dirpath, f))
             except OSError:
                 pass
+    _usage_cache[org_id] = (now, total)
     return total
+
+
+def invalidate_usage_cache(org_id: str) -> None:
+    """Clear cached usage after upload completes."""
+    _usage_cache.pop(org_id, None)
 
 
 def get_org_quota(org_id: str) -> int:
@@ -80,7 +102,9 @@ def get_org_storage_info(org_id: str) -> dict:
 def check_storage_quota(request: Request, additional_bytes: int = 0) -> None:
     """Check if the user's org has sufficient storage quota.
 
-    Raises HTTP 413 if over quota. No-op when auth is disabled.
+    Also enforces max concurrent uploads per user.
+    Raises HTTP 413 if over quota, 429 if too many concurrent uploads.
+    No-op when auth is disabled.
     """
     if not AUTH_ENABLED:
         return
@@ -90,6 +114,18 @@ def check_storage_quota(request: Request, additional_bytes: int = 0) -> None:
         return
     if user.is_admin:
         return
+
+    # Concurrent upload limit
+    if _MAX_CONCURRENT_UPLOADS > 0:
+        with _upload_lock:
+            current = _active_uploads.get(user.user_id, 0)
+            if current >= _MAX_CONCURRENT_UPLOADS:
+                raise HTTPException(
+                    status_code=429,
+                    detail=f"Too many concurrent uploads (max {_MAX_CONCURRENT_UPLOADS}). "
+                    "Wait for current uploads to finish.",
+                )
+            _active_uploads[user.user_id] = current + 1
 
     org_store = get_org_store()
     user_orgs = org_store.list_user_orgs(user.user_id)
@@ -101,6 +137,7 @@ def check_storage_quota(request: Request, additional_bytes: int = 0) -> None:
     quota = get_org_quota(org.org_id)
 
     if used + additional_bytes > quota:
+        _release_upload_slot(user.user_id)
         used_gb = round(used / _GB, 1)
         quota_gb = round(quota / _GB, 1)
         raise HTTPException(
@@ -108,3 +145,31 @@ def check_storage_quota(request: Request, additional_bytes: int = 0) -> None:
             detail=f"Storage quota exceeded: {used_gb} GB used of {quota_gb} GB. "
             f"Delete clips or contact an admin to increase your quota.",
         )
+
+
+def _release_upload_slot(user_id: str) -> None:
+    """Release a concurrent upload slot."""
+    with _upload_lock:
+        current = _active_uploads.get(user_id, 0)
+        if current > 0:
+            _active_uploads[user_id] = current - 1
+        else:
+            _active_uploads.pop(user_id, None)
+
+
+def finish_upload(request: Request) -> None:
+    """Call after an upload completes to release the slot and invalidate cache.
+
+    Should be called in a finally block in upload endpoints.
+    """
+    if not AUTH_ENABLED:
+        return
+    user = get_current_user(request)
+    if not user or user.is_admin:
+        return
+    _release_upload_slot(user.user_id)
+    # Invalidate cached disk usage so next check is fresh
+    org_store = get_org_store()
+    user_orgs = org_store.list_user_orgs(user.user_id)
+    if user_orgs:
+        invalidate_usage_cache(user_orgs[0].org_id)
