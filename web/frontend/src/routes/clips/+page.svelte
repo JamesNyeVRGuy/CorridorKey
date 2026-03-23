@@ -17,6 +17,7 @@
 	let loading = $state(true);
 	let error = $state<string | null>(null);
 	let uploading = $state(false);
+	let uploadProgress = $state(0); // 0-100
 	let uploadError = $state<string | null>(null);
 	let dragOver = $state(false);
 	let creatingProject = $state(false);
@@ -245,15 +246,20 @@
 
 	async function handleFiles(files: FileList | File[]) {
 		uploading = true;
+		uploadProgress = 0;
 		uploadError = null;
+		const onProgress = (loaded: number, total: number) => {
+			uploadProgress = Math.round((loaded / total) * 100);
+		};
 		let lastUploadedClips: string[] = [];
 		try {
 			for (const file of files) {
 				let result: any;
+				uploadProgress = 0;
 				if (isVideo(file.name)) {
-					result = await api.upload.video(file, undefined, $autoExtractFrames);
+					result = await api.upload.video(file, undefined, $autoExtractFrames, onProgress);
 				} else if (isZip(file.name)) {
-					result = await api.upload.frames(file);
+					result = await api.upload.frames(file, undefined, onProgress);
 				} else {
 					uploadError = `Unsupported: ${file.name}. Use videos (.mp4, .mov, etc.) or zipped frames (.zip).`;
 					continue;
@@ -340,7 +346,7 @@
 			</button>
 			<label class="btn-accent" class:disabled={uploading}>
 				<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 2v8M3 6l4-4 4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M2 11h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-				{uploading ? 'Uploading...' : 'Upload'}
+				{uploading ? `Uploading ${uploadProgress}%` : 'Upload'}
 				<input type="file" accept=".mp4,.mov,.avi,.mkv,.mxf,.webm,.m4v,.zip" multiple hidden oninput={onFileInput} disabled={uploading} />
 			</label>
 			<button class="btn-ghost" onclick={loadProjects} disabled={loading}>
@@ -381,6 +387,13 @@
 	{#if error || uploadError}
 		<div class="error-banner mono">
 			{error || uploadError}
+		</div>
+	{/if}
+
+	{#if uploading}
+		<div class="upload-bar">
+			<div class="upload-bar-fill" style="width: {uploadProgress}%"></div>
+			<span class="upload-bar-text mono">Uploading {uploadProgress}%</span>
 		</div>
 	{/if}
 
@@ -637,6 +650,35 @@
 		border-radius: var(--radius-md);
 		font-size: 12px;
 		color: var(--state-error);
+	}
+
+	.upload-bar {
+		position: relative;
+		height: 28px;
+		background: var(--surface-2);
+		border: 1px solid var(--border);
+		border-radius: var(--radius-sm);
+		margin-bottom: var(--sp-3);
+		overflow: hidden;
+	}
+
+	.upload-bar-fill {
+		position: absolute;
+		inset: 0;
+		background: var(--accent-muted);
+		transition: width 0.2s ease;
+	}
+
+	.upload-bar-text {
+		position: relative;
+		z-index: 1;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		height: 100%;
+		font-size: 11px;
+		color: var(--accent);
+		letter-spacing: 0.06em;
 	}
 
 	.drop-overlay {

@@ -55,23 +55,54 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 	return res.json();
 }
 
-async function uploadRequest<T>(path: string, form: FormData): Promise<T> {
+/** Upload progress callback — called with (loaded, total) bytes */
+export type UploadProgressFn = (loaded: number, total: number) => void;
+
+async function uploadRequest<T>(path: string, form: FormData, onProgress?: UploadProgressFn): Promise<T> {
 	const headers: Record<string, string> = {};
 	await attachAuth(headers);
-	let res = await fetch(`${BASE}${path}`, { method: 'POST', headers, body: form });
-	if (res.status === 401) {
-		const retry = await handle401('POST', path, { method: 'POST', headers, body: form });
-		if (!retry) throw new Error('Session expired');
-		res = retry;
-	}
-	if (!res.ok) {
-		if (res.status === 413) {
-			throw new Error('File too large. The server or CDN may limit upload size (Cloudflare free: 100MB). Try compressing your video or using a ZIP of frames.');
+
+	// Use XMLHttpRequest for progress tracking
+	return new Promise<T>((resolve, reject) => {
+		const xhr = new XMLHttpRequest();
+		xhr.open('POST', `${BASE}${path}`);
+		for (const [k, v] of Object.entries(headers)) {
+			xhr.setRequestHeader(k, v);
 		}
-		const detail = await res.json().catch(() => ({ detail: res.statusText }));
-		throw new Error(detail.detail || res.statusText);
-	}
-	return res.json();
+		if (onProgress) {
+			xhr.upload.onprogress = (e) => {
+				if (e.lengthComputable) onProgress(e.loaded, e.total);
+			};
+		}
+		xhr.onload = () => {
+			if (xhr.status === 413) {
+				reject(new Error('File too large. The server or CDN may limit upload size (Cloudflare free: 100MB). Try compressing your video or using a ZIP of frames.'));
+				return;
+			}
+			if (xhr.status === 401) {
+				reject(new Error('Session expired'));
+				return;
+			}
+			if (xhr.status >= 400) {
+				try {
+					const detail = JSON.parse(xhr.responseText);
+					reject(new Error(detail.detail || xhr.statusText));
+				} catch {
+					reject(new Error(xhr.statusText));
+				}
+				return;
+			}
+			try {
+				resolve(JSON.parse(xhr.responseText));
+			} catch {
+				reject(new Error('Invalid response'));
+			}
+		};
+		xhr.onerror = () => reject(new Error('Upload failed — network error'));
+		xhr.ontimeout = () => reject(new Error('Upload timed out'));
+		xhr.timeout = 600000; // 10 minute timeout
+		xhr.send(form);
+	});
 }
 
 // --- Types ---
@@ -264,19 +295,19 @@ export const api = {
 		downloadWeights: (name: string) => request<unknown>('POST', `/api/system/weights/download/${name}`)
 	},
 	upload: {
-		video: async (file: File, name?: string, autoExtract = true): Promise<{ status: string; clips: Clip[]; extract_jobs: string[] }> => {
+		video: async (file: File, name?: string, autoExtract = true, onProgress?: UploadProgressFn): Promise<{ status: string; clips: Clip[]; extract_jobs: string[] }> => {
 			const form = new FormData();
 			form.append('file', file);
 			const qs = new URLSearchParams();
 			if (name) qs.set('name', name);
 			qs.set('auto_extract', String(autoExtract));
-			return uploadRequest(`/api/upload/video?${qs}`, form);
+			return uploadRequest(`/api/upload/video?${qs}`, form, onProgress);
 		},
-		frames: async (file: File, name?: string): Promise<{ status: string; clips: Clip[]; frame_count: number }> => {
+		frames: async (file: File, name?: string, onProgress?: UploadProgressFn): Promise<{ status: string; clips: Clip[]; frame_count: number }> => {
 			const form = new FormData();
 			form.append('file', file);
 			const params = name ? `?name=${encodeURIComponent(name)}` : '';
-			return uploadRequest(`/api/upload/frames${params}`, form);
+			return uploadRequest(`/api/upload/frames${params}`, form, onProgress);
 		},
 		mask: async (clipName: string, file: File): Promise<unknown> => {
 			const form = new FormData();
