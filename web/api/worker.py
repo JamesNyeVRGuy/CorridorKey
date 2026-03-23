@@ -180,7 +180,7 @@ def _execute_gpu_job(service: CorridorKeyService, job: GPUJob, clips_dir: str) -
     """Execute a GPU job (inference, GVM, VideoMaMa)."""
     clip = _find_clip(service, clips_dir, job.clip_name)
     if clip is None:
-        raise CorridorKeyError(f"Clip '{job.clip_name}' not found in {clips_dir}")
+        raise CorridorKeyError(f"Clip '{job.clip_name}' not found")
 
     def on_progress(clip_name: str, current: int, total: int) -> None:
         job.current_frame = current
@@ -255,6 +255,9 @@ def _chain_next_pipeline_step(job: GPUJob, queue: GPUJobQueue, clips_dir: str, s
         )
 
     if next_job:
+        # Propagate tenant context for multi-tenant isolation
+        next_job.org_id = job.org_id
+        next_job.submitted_by = job.submitted_by
         # Pin to the same node so it has the intermediate files (important for HTTP transfer)
         if job.claimed_by and job.claimed_by != "local":
             next_job.preferred_node = job.claimed_by
@@ -270,11 +273,13 @@ def _run_job(service: CorridorKeyService, job: GPUJob, queue: GPUJobQueue, clips
     manager.send_job_status(job.id, JobStatus.RUNNING.value, org_id=job.org_id)
 
     try:
-        if job.job_type in _CPU_JOB_TYPES:
+        if job.job_type == JobType.VIDEO_EXTRACT:
             clip = _find_clip(service, clips_dir, job.clip_name)
             if clip is None:
                 raise CorridorKeyError(f"Clip '{job.clip_name}' not found")
             _execute_extraction(job, clip, clips_dir)
+        elif job.job_type in _CPU_JOB_TYPES:
+            raise CorridorKeyError(f"CPU job type '{job.job_type.value}' not yet implemented")
         else:
             _execute_gpu_job(service, job, clips_dir)
 
@@ -292,8 +297,10 @@ def _run_job(service: CorridorKeyService, job: GPUJob, queue: GPUJobQueue, clips
     except Exception as e:
         error_msg = str(e)
         logger.exception(f"Job {job.id} failed: {error_msg}")
-        queue.fail_job(job, error_msg)
-        manager.send_job_status(job.id, JobStatus.FAILED.value, error=error_msg, org_id=job.org_id)
+        # Sanitize: only expose CorridorKeyError messages to clients
+        client_msg = str(e) if isinstance(e, CorridorKeyError) else "Internal processing error"
+        queue.fail_job(job, error_msg)  # full detail in server-side history
+        manager.send_job_status(job.id, JobStatus.FAILED.value, error=client_msg, org_id=job.org_id)
 
 
 # Track running GPU jobs
@@ -365,13 +372,18 @@ def worker_loop(
                 manager.send_job_status(job_id, JobStatus.COMPLETED.value, org_id=oid)
                 manager.send_clip_state_changed(clip_name, clip_state, org_id=oid)
                 _chain_next_pipeline_step(job, queue, clips_dir, service)
+            else:
+                logger.error(f"Subprocess completed job {job_id} but job not found in queue")
+                manager.send_job_status(job_id, JobStatus.COMPLETED.value)
 
         def _on_sp_failed(job_id, error):
             job = queue.find_job_by_id(job_id)
             if job:
                 oid = job.org_id
-                queue.fail_job(job, error)
-                manager.send_job_status(job_id, JobStatus.FAILED.value, error=error, org_id=oid)
+                queue.fail_job(job, error)  # full detail in server-side history
+                manager.send_job_status(job_id, JobStatus.FAILED.value, error="Internal processing error", org_id=oid)
+            else:
+                logger.error(f"Subprocess failed job {job_id} but job not found in queue: {error}")
 
         gpu_subprocess_pool.set_callbacks(
             on_progress=_on_sp_progress,
@@ -392,36 +404,44 @@ def worker_loop(
         with _running_gpu_lock:
             _running_gpu_count -= 1
 
+    _cpu_types = [t.value for t in _CPU_JOB_TYPES]
+    _gpu_types = [t.value for t in JobType if t not in _CPU_JOB_TYPES]
+
     while not stop_event.is_set():
+        # Always try CPU jobs first — they never block on GPU availability
+        cpu_job = queue.claim_job("local", accepted_types=_cpu_types)
+        if cpu_job:
+            cpu_pool.submit(_run_job, service, cpu_job, queue, clips_dir)
+            continue
+
+        # Check if there are GPU jobs to process
         peeked = queue.next_job()
         if peeked is None:
             stop_event.wait(0.5)
             continue
 
-        is_cpu = peeked.job_type in _CPU_JOB_TYPES
+        if peeked.job_type in _CPU_JOB_TYPES:
+            # CPU job that wasn't claimable (e.g. preferred_node mismatch) — wait
+            stop_event.wait(0.5)
+            continue
 
-        if not is_cpu and not _local_gpu_enabled:
+        if not _local_gpu_enabled:
             stop_event.wait(1.0)
             continue
 
         # Claim delay: give remote nodes a head start on GPU jobs
-        if not is_cpu and _local_claim_delay > 0:
+        if _local_claim_delay > 0:
             stop_event.wait(_local_claim_delay)
             # Re-check if job was claimed by a node during the delay
             if queue.next_job() is not peeked:
                 continue
 
-        if is_cpu:
-            job = queue.claim_job("local")
-            if job is None:
-                continue
-            cpu_pool.submit(_run_job, service, job, queue, clips_dir)
-        elif use_subprocess_pool and gpu_subprocess_pool:
+        if use_subprocess_pool and gpu_subprocess_pool:
             # Multi-GPU: dispatch to subprocess pool
             if not gpu_subprocess_pool.has_idle_gpu():
                 stop_event.wait(0.5)
                 continue
-            job = queue.claim_job("local")
+            job = queue.claim_job("local", accepted_types=_gpu_types)
             if job is None:
                 continue
             if not gpu_subprocess_pool.submit(job, clips_dir):
@@ -429,21 +449,20 @@ def worker_loop(
                 queue.requeue_job(job)
                 stop_event.wait(0.5)
         else:
-            # Single GPU: use thread pool
+            # Single GPU: use thread pool (never sleep inside the lock)
+            claimed_job = None
             with _running_gpu_lock:
-                if _running_gpu_count >= 1:
-                    stop_event.wait(0.5)
-                    continue
-                if not _can_start_gpu_job():
-                    stop_event.wait(1.0)
-                    continue
-                job = queue.claim_job("local")
-                if job is None:
-                    continue
-                _running_gpu_count += 1
+                if _running_gpu_count < 1 and _can_start_gpu_job():
+                    claimed_job = queue.claim_job("local", accepted_types=_gpu_types)
+                    if claimed_job is not None:
+                        _running_gpu_count += 1
 
-            future = gpu_thread_pool.submit(_run_job, service, job, queue, clips_dir)
-            future.add_done_callback(lambda f, j=job: _on_gpu_done(f, j))
+            if claimed_job is None:
+                stop_event.wait(0.5)
+                continue
+
+            future = gpu_thread_pool.submit(_run_job, service, claimed_job, queue, clips_dir)
+            future.add_done_callback(lambda f, j=claimed_job: _on_gpu_done(f, j))
 
     logger.info("Shutting down worker pools")
     if gpu_subprocess_pool:

@@ -126,18 +126,17 @@ class GPUJobQueue:
         self._lock = threading.Lock()
         self._running_jobs: list[GPUJob] = []
         self._history: list[GPUJob] = []  # completed/cancelled/failed jobs for UI display
+        # Callbacks (set by UI or CLI)
+        self.on_progress: ProgressCallback | None = None
+        self.on_warning: WarningCallback | None = None
+        self.on_completion: CompletionCallback | None = None
+        self.on_error: ErrorCallback | None = None
 
     def _add_to_history(self, job: GPUJob) -> None:
         """Append a job to history, evicting oldest if over capacity. Must hold _lock."""
         self._history.append(job)
         if len(self._history) > self._MAX_HISTORY:
             self._history = self._history[-self._MAX_HISTORY:]
-
-        # Callbacks (set by UI or CLI)
-        self.on_progress: ProgressCallback | None = None
-        self.on_warning: WarningCallback | None = None
-        self.on_completion: CompletionCallback | None = None
-        self.on_error: ErrorCallback | None = None
 
     def submit(self, job: GPUJob) -> bool:
         """Add a job to the queue. Returns False if duplicate detected.
