@@ -31,8 +31,17 @@ class FileTransfer:
         self.timeout = timeout
         self._headers = {"Authorization": f"Bearer {auth_token}"} if auth_token else {}
 
+    def set_job_id(self, job_id: str | None) -> None:
+        """Set the current job_id for org-scoped file resolution."""
+        self._job_id = job_id
+
     def _url(self, path: str) -> str:
-        return f"{self.main_url}/api/nodes/{self.node_id}/files/{path}"
+        base = f"{self.main_url}/api/nodes/{self.node_id}/files/{path}"
+        job_id = getattr(self, "_job_id", None)
+        if job_id:
+            sep = "&" if "?" in base else "?"
+            base += f"{sep}job_id={job_id}"
+        return base
 
     def list_files(self, clip_name: str, pass_name: str) -> tuple[str | None, list[str]]:
         """List files available for a clip pass.

@@ -100,10 +100,14 @@ def _check_node_identity(request: Request, node_id: str) -> None:
 router = APIRouter(prefix="/api/nodes", tags=["nodes"], dependencies=[Depends(_check_node_auth)])
 
 
-def _node_clips_dir(node_id: str, org_id: str | None = None) -> str:
-    """Resolve org-scoped clips dir. Uses provided org_id (e.g., from job), falls back to node's org."""
+def _node_clips_dir(node_id: str, org_id: str | None = None, job_id: str | None = None) -> str:
+    """Resolve org-scoped clips dir. Tries: explicit org_id > job_id lookup > node's current job > node's org."""
+    if not org_id and job_id:
+        queue = get_queue()
+        job = queue.find_job_by_id(job_id)
+        if job and job.org_id:
+            return resolve_node_clips_dir(job.org_id)
     if not org_id:
-        # Try to get org from node's current job (file endpoints don't have job context)
         node = registry.get_node(node_id)
         if node and node.current_job_id:
             queue = get_queue()
@@ -604,7 +608,7 @@ def report_job_result(node_id: str, req: JobResultRequest, request: Request):
 
 
 @router.get("/{node_id}/files/{clip_name}/{pass_name}")
-def list_clip_files(node_id: str, clip_name: str, pass_name: str, request: Request):
+def list_clip_files(node_id: str, clip_name: str, pass_name: str, request: Request, job_id: str | None = Query(None)):
     """List files available for download for a specific clip pass."""
     _check_node_identity(request, node_id)
     _PASS_MAP = {
@@ -619,7 +623,7 @@ def list_clip_files(node_id: str, clip_name: str, pass_name: str, request: Reque
         raise HTTPException(status_code=400, detail=f"Unknown pass: {pass_name}")
 
     service = get_service()
-    clips = service.scan_clips(_node_clips_dir(node_id))
+    clips = service.scan_clips(_node_clips_dir(node_id, job_id=job_id))
     clip = next((c for c in clips if c.name == clip_name), None)
     if not clip:
         raise HTTPException(status_code=404, detail=f"Clip '{clip_name}' not found")
@@ -641,6 +645,7 @@ def download_clip_bundle(
     request: Request,
     start: int = Query(0),
     end: int = Query(-1),
+    job_id: str | None = Query(None),
 ):
     """Download multiple files as a tar stream. Much faster than one-per-file."""
     _check_node_identity(request, node_id)
@@ -656,7 +661,7 @@ def download_clip_bundle(
         raise HTTPException(status_code=400, detail=f"Unknown pass: {pass_name}")
 
     service = get_service()
-    clips = service.scan_clips(_node_clips_dir(node_id))
+    clips = service.scan_clips(_node_clips_dir(node_id, job_id=job_id))
     clip = next((c for c in clips if c.name == clip_name), None)
     if not clip:
         raise HTTPException(status_code=404, detail=f"Clip '{clip_name}' not found")
@@ -705,7 +710,7 @@ def download_clip_bundle(
 
 
 @router.get("/{node_id}/files/{clip_name}/{pass_name}/{filename}")
-def download_clip_file(node_id: str, clip_name: str, pass_name: str, filename: str, request: Request):
+def download_clip_file(node_id: str, clip_name: str, pass_name: str, filename: str, request: Request, job_id: str | None = Query(None)):
     """Download a single file from a clip pass. Used by nodes without shared storage."""
     _check_node_identity(request, node_id)
     _PASS_MAP = {
@@ -720,7 +725,7 @@ def download_clip_file(node_id: str, clip_name: str, pass_name: str, filename: s
         raise HTTPException(status_code=400, detail=f"Unknown pass: {pass_name}")
 
     service = get_service()
-    clips = service.scan_clips(_node_clips_dir(node_id))
+    clips = service.scan_clips(_node_clips_dir(node_id, job_id=job_id))
     clip = next((c for c in clips if c.name == clip_name), None)
     if not clip:
         raise HTTPException(status_code=404, detail=f"Clip '{clip_name}' not found")
@@ -734,7 +739,7 @@ def download_clip_file(node_id: str, clip_name: str, pass_name: str, filename: s
 
 
 @router.post("/{node_id}/files/{clip_name}/{pass_name}/bundle")
-async def upload_result_bundle(node_id: str, clip_name: str, pass_name: str, request: Request):
+async def upload_result_bundle(node_id: str, clip_name: str, pass_name: str, request: Request, job_id: str | None = Query(None)):
     """Upload multiple result files as a tar stream. Much faster than one-per-file."""
     _check_node_identity(request, node_id)
     _OUTPUT_MAP = {
@@ -750,7 +755,7 @@ async def upload_result_bundle(node_id: str, clip_name: str, pass_name: str, req
         raise HTTPException(status_code=400, detail=f"Unknown output pass: {pass_name}")
 
     service = get_service()
-    clips = service.scan_clips(_node_clips_dir(node_id))
+    clips = service.scan_clips(_node_clips_dir(node_id, job_id=job_id))
     clip = next((c for c in clips if c.name == clip_name), None)
     if not clip:
         raise HTTPException(status_code=404, detail=f"Clip '{clip_name}' not found")
@@ -797,7 +802,7 @@ async def upload_result_bundle(node_id: str, clip_name: str, pass_name: str, req
 
 @router.post("/{node_id}/files/{clip_name}/{pass_name}/{filename}")
 async def upload_result_file(
-    node_id: str, clip_name: str, pass_name: str, filename: str, file: UploadFile, request: Request
+    node_id: str, clip_name: str, pass_name: str, filename: str, file: UploadFile, request: Request, job_id: str | None = Query(None)
 ):
     """Upload a result file from a node. Used by nodes without shared storage."""
     _check_node_identity(request, node_id)
@@ -814,7 +819,7 @@ async def upload_result_file(
         raise HTTPException(status_code=400, detail=f"Unknown output pass: {pass_name}")
 
     service = get_service()
-    clips = service.scan_clips(_node_clips_dir(node_id))
+    clips = service.scan_clips(_node_clips_dir(node_id, job_id=job_id))
     clip = next((c for c in clips if c.name == clip_name), None)
     if not clip:
         raise HTTPException(status_code=404, detail=f"Clip '{clip_name}' not found")

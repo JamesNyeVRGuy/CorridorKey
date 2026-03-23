@@ -275,6 +275,9 @@ class NodeAgent:
 
         logger.info(f"Processing job {job_id}: {job_data['job_type']} for '{clip_name}' on GPU {gpu_index}")
 
+        # Set job context for org-scoped file resolution (survives server restarts)
+        self.file_transfer.set_job_id(job_id)
+
         if use_shared:
             clips_dir = str(Path(job_data.get("shared_clip_root", "")).parent)
         else:
