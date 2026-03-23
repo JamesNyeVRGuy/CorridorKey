@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { refreshClips } from '$lib/stores/clips';
+	import { activeOrgId } from '$lib/stores/orgs';
 	import { refreshJobs } from '$lib/stores/jobs';
 	import { autoExtractFrames, autoShard } from '$lib/stores/settings';
 	import { api } from '$lib/api';
@@ -324,6 +325,15 @@
 	let totalClips = $derived(projects.reduce((sum, p) => sum + p.clips.length, 0));
 
 	onMount(loadProjects);
+
+	// Reload when active org changes (org switcher)
+	let _prevOrg = $activeOrgId;
+	$effect(() => {
+		if ($activeOrgId && $activeOrgId !== _prevOrg) {
+			_prevOrg = $activeOrgId;
+			loadProjects();
+		}
+	});
 </script>
 
 <svelte:head>

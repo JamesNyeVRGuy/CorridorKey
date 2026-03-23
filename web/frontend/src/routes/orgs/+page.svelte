@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { getStoredUser } from '$lib/auth';
 	import { goto } from '$app/navigation';
+	import { loadUserOrgs } from '$lib/stores/orgs';
 
 	interface OrgInfo {
 		org_id: string;
@@ -70,6 +71,7 @@
 			});
 			newOrgName = '';
 			await loadOrgs();
+			loadUserOrgs(); // Update sidebar org switcher
 		} catch (e) {
 			createError = e instanceof Error ? e.message : 'Failed to create org';
 		} finally {
@@ -144,6 +146,7 @@
 			await authFetch(`/api/orgs/${org.org_id}`, { method: 'DELETE' });
 			selectedOrg = null;
 			await loadOrgs();
+			loadUserOrgs(); // Update sidebar org switcher
 		} catch { /* ignore */ }
 	}
 
