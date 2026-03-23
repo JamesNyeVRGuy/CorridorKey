@@ -286,18 +286,23 @@ def register_node(req: NodeRegisterRequest, request: Request):
         _restore_node_config(node)
         manager.send_node_update(node.to_dict(), org_id=node.org_id)
     # Version comparison — use build_number for proper ordering
-    from ..version import BUILD_NUMBER, VERSION_STRING
+    from ..version import BUILD_NUMBER, MIN_NODE_BUILD, VERSION_STRING
 
     server_version = VERSION_STRING
     node_build = req.security.build_number
-    # Node is outdated if its build_number is lower than the server's.
-    # build_number=0 means unknown (old agent) — treat as outdated if versions differ.
-    if node_build > 0 and BUILD_NUMBER > 0:
-        version_ok = node_build >= BUILD_NUMBER
+
+    # Version check: node must meet the minimum build requirement.
+    # MIN_NODE_BUILD defaults to the server's own BUILD_NUMBER (require latest),
+    # but can be set lower via CK_MIN_NODE_BUILD to accept older nodes.
+    if node_build > 0 and MIN_NODE_BUILD > 0:
+        version_ok = node_build >= MIN_NODE_BUILD
     elif req.security.agent_version:
         version_ok = req.security.agent_version == VERSION_STRING
     else:
-        version_ok = True  # Can't determine — assume ok
+        version_ok = False  # Unknown version — flag as outdated
+
+    if node:
+        node.version_ok = version_ok
 
     if not version_ok:
         logger.info(
@@ -472,6 +477,10 @@ async def get_next_job(node_id: str, request: Request):
     if not node.can_accept_jobs:
         return {"job": None, "reason": "paused" if node.paused else "outside_schedule"}
 
+    # Block outdated nodes from picking up jobs
+    if not node.version_ok:
+        return {"job": None, "reason": "outdated"}
+
     # Reputation-weighted delay: high-rep nodes claim immediately,
     # low-rep nodes wait up to 1 second. Score 100 = 0s, score 0 = 1s.
     from ..node_reputation import get_reputation
@@ -550,10 +559,15 @@ def report_job_result(node_id: str, req: JobResultRequest, request: Request):
     queue = get_queue()
     job = queue.find_job_by_id(req.job_id)
     if not job:
-        raise HTTPException(status_code=404, detail=f"Job '{req.job_id}' not found")
+        # Job may have been reaped and re-completed by another worker.
+        # The node still did valid work (files already uploaded), so accept gracefully.
+        logger.warning(f"Node {node_id} reported result for unknown job {req.job_id} (may have been reaped)")
+        registry.set_idle(node_id)
+        return {"status": "ok"}
 
-    # Verify this node is the one assigned to the job (prevents credit fraud)
-    if job.claimed_by and job.claimed_by != node_id:
+    # Verify this node is the one assigned to the job (prevents credit fraud).
+    # Allow if claimed_by is None (job was reaped but node finished the work).
+    if job.claimed_by and job.claimed_by != node_id and job.claimed_by != "local":
         raise HTTPException(status_code=403, detail="Job is assigned to a different node")
 
     oid = job.org_id

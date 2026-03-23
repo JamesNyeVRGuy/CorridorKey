@@ -51,3 +51,10 @@ if not BUILD_COMMIT:
 BUILD_COMMIT = BUILD_COMMIT or "dev"
 
 VERSION_STRING = f"{API_VERSION}+{BUILD_COMMIT}"
+
+# Minimum node build number required to accept jobs.
+# Set this to the BUILD_NUMBER of the oldest acceptable node image.
+# Nodes older than this are flagged as outdated and blocked from job dispatch.
+# Update this when a node-side fix is critical (e.g., file transfer changes).
+# 0 = no minimum enforced.
+MIN_NODE_BUILD = int(os.environ.get("CK_MIN_NODE_BUILD", str(BUILD_NUMBER)).strip() or "0")

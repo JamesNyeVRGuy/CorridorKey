@@ -89,6 +89,7 @@ class NodeInfo:
     accepted_types: list[str] = field(default_factory=list)
     agent_version: str = ""  # reported by node on registration
     build_number: int = 0  # git commit timestamp — higher = newer
+    version_ok: bool = True  # set at registration — False if outdated
     cpu_stats: dict = field(default_factory=dict)  # {cpu_percent, cpu_count, ram_*}
     health_history: list[dict] = field(default_factory=list, repr=False)  # last N snapshots
     recent_logs: list[str] = field(default_factory=list, repr=False)
@@ -114,7 +115,7 @@ class NodeInfo:
 
     @property
     def is_alive(self) -> bool:
-        return time.time() - self.last_heartbeat < 30  # 30s timeout
+        return time.time() - self.last_heartbeat < 60  # 60s timeout (heartbeat every 10s)
 
     @property
     def can_accept_jobs(self) -> bool:
@@ -158,6 +159,7 @@ class NodeInfo:
             "accepted_types": self.accepted_types,
             "cpu_stats": self.cpu_stats,
             "agent_version": self.agent_version,
+            "version_ok": self.version_ok,
         }
 
     def to_safe_dict(self) -> dict:
@@ -182,6 +184,7 @@ class NodeInfo:
             "accepted_types": [],
             "cpu_stats": {},
             "agent_version": self.agent_version,
+            "version_ok": self.version_ok,
         }
 
 
