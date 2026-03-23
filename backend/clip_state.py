@@ -202,7 +202,7 @@ class ClipEntry:
         """
         manifest = self._read_manifest()
         if manifest:
-            enabled = manifest.get("enabled_outputs", [])
+            enabled = manifest.get("enabled_outputs", []) or ["fg", "matte"]
         else:
             enabled = ["fg", "matte"]
 
@@ -352,12 +352,16 @@ class ClipEntry:
         # READY: AlphaHint must cover ALL input frames (not partial)
         if self.alpha_asset is not None:
             if self.input_asset is not None and self.alpha_asset.frame_count < self.input_asset.frame_count:
-                # Partial alpha — don't promote to READY, fall through
+                # Partial alpha — stay RAW so user can re-run GVM.
+                # Don't fall through to MASKED/EXTRACTING which would
+                # incorrectly demote the clip's pipeline stage.
                 logger.info(
                     f"Clip '{self.name}': partial alpha "
                     f"({self.alpha_asset.frame_count}/{self.input_asset.frame_count}), "
-                    f"staying at lower state"
+                    f"staying at RAW"
                 )
+                self.state = ClipState.RAW
+                return
             else:
                 self.state = ClipState.READY
                 return
