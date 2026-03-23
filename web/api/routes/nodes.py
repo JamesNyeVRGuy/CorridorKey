@@ -17,6 +17,7 @@ from backend.natural_sort import natsorted
 from ..database import get_storage
 from ..deps import get_queue, get_service
 from ..nodes import GPUSlot, NodeInfo, NodeSchedule, registry
+from ..org_isolation import resolve_node_clips_dir
 from ..path_security import safe_join
 from ..routes import clips as _clips_mod
 from ..ws import manager
@@ -26,6 +27,9 @@ logger = logging.getLogger(__name__)
 # Legacy shared secret — set CK_AUTH_TOKEN for backward compatibility
 _AUTH_TOKEN = os.environ.get("CK_AUTH_TOKEN", "").strip()
 
+# Max upload size for node file transfers (default 10GB)
+_MAX_UPLOAD_BYTES = int(os.environ.get("CK_MAX_NODE_UPLOAD_BYTES", str(10 * 1024**3)))
+
 
 def _check_node_auth(request: Request) -> None:
     """Verify node auth via per-node token or legacy shared secret.
@@ -34,6 +38,10 @@ def _check_node_auth(request: Request) -> None:
     1. Per-node token (from node_tokens store) — sets request.state.node_org_id
     2. Legacy CK_AUTH_TOKEN shared secret
     3. If neither is configured, allow all (backward compat)
+
+    When a bearer token is provided but is invalid, auth always fails —
+    even if no auth is configured. This prevents revoked tokens from
+    granting access.
     """
     auth = request.headers.get("Authorization", "")
     bearer = auth[7:] if auth.startswith("Bearer ") else ""
@@ -45,27 +53,57 @@ def _check_node_auth(request: Request) -> None:
         store = get_node_token_store()
         node_token = store.validate(bearer)
         if node_token:
-            # Valid per-node token — store org_id for registration
+            # Valid per-node token — store org_id and bound node_id
             request.state.node_org_id = node_token.org_id
             request.state.node_token = bearer
+            request.state.node_token_node_id = node_token.node_id  # may be None before registration
             return
 
         # Check legacy shared secret
         if _AUTH_TOKEN and bearer == _AUTH_TOKEN:
             request.state.node_org_id = None
             request.state.node_token = None
+            request.state.node_token_node_id = None
             return
+
+        # Token was provided but didn't match anything — always reject
+        raise HTTPException(status_code=401, detail="Invalid or revoked node auth token")
 
     # No bearer token at all
     if not _AUTH_TOKEN:
+        # Check if per-node tokens have been created — if so, require auth
+        from ..node_tokens import get_node_token_store
+
+        store = get_node_token_store()
+        if store.list_all():
+            raise HTTPException(status_code=401, detail="Authentication required")
         request.state.node_org_id = None
         request.state.node_token = None
+        request.state.node_token_node_id = None
         return  # no auth configured, allow all
 
     raise HTTPException(status_code=401, detail="Invalid or missing node auth token")
 
 
+def _check_node_identity(request: Request, node_id: str) -> None:
+    """Verify the authenticated token is bound to this node_id.
+
+    Skipped for legacy shared-secret auth and no-auth mode (node_token is None).
+    Registration binds the token to the node, so this check runs on all
+    subsequent requests (heartbeat, job dispatch, file transfer, etc.).
+    """
+    bound_node_id = getattr(request.state, "node_token_node_id", None)
+    if bound_node_id is not None and bound_node_id != node_id:
+        raise HTTPException(status_code=403, detail="Token not authorized for this node")
+
+
 router = APIRouter(prefix="/api/nodes", tags=["nodes"], dependencies=[Depends(_check_node_auth)])
+
+
+def _node_clips_dir(node_id: str) -> str:
+    """Resolve org-scoped clips dir for a node. Falls back to base clips dir."""
+    node = registry.get_node(node_id)
+    return resolve_node_clips_dir(node.org_id if node else None)
 
 
 def _save_node_config(node_id: str, node: NodeInfo) -> None:
@@ -195,7 +233,10 @@ def register_node(req: NodeRegisterRequest, request: Request):
         record_security_warning(req.node_id, security_warnings)
 
     # --- Registration ---
-    org_id = getattr(request.state, "node_org_id", None) or req.org_id
+    # Org from per-node token takes precedence; legacy auth cannot self-assign org
+    org_id = getattr(request.state, "node_org_id", None)
+    if not org_id and req.org_id:
+        logger.warning(f"Node {req.name} ({req.node_id}) attempted org_id override ({req.org_id}) without per-node token — ignored")
     gpu_slots = [
         GPUSlot(index=g.index, name=g.name, vram_total_gb=g.vram_total_gb, vram_free_gb=g.vram_free_gb)
         for g in req.gpus
@@ -215,9 +256,14 @@ def register_node(req: NodeRegisterRequest, request: Request):
         agent_version=req.security.agent_version,
         build_number=req.security.build_number,
     )
+    # Bind per-node token to this node_id (reject if already bound to different node)
+    node_token = getattr(request.state, "node_token", None)
+    bound_node_id = getattr(request.state, "node_token_node_id", None)
+    if node_token and bound_node_id and bound_node_id != req.node_id:
+        raise HTTPException(status_code=403, detail="This token is already bound to a different node")
+
     registry.register(info)
     # Associate the per-node token with this node_id
-    node_token = getattr(request.state, "node_token", None)
     if node_token:
         from ..node_tokens import get_node_token_store
         get_node_token_store().mark_used_by_node(node_token, req.node_id)
@@ -256,8 +302,9 @@ def register_node(req: NodeRegisterRequest, request: Request):
 
 
 @router.post("/{node_id}/heartbeat")
-def node_heartbeat(node_id: str, req: NodeHeartbeatRequest):
+def node_heartbeat(node_id: str, req: NodeHeartbeatRequest, request: Request):
     """Update node heartbeat and VRAM status."""
+    _check_node_identity(request, node_id)
     # 410 Gone = node was explicitly removed via UI, agent should shut down
     if registry.is_dismissed(node_id):
         raise HTTPException(status_code=410, detail="Node was removed — shutting down")
@@ -278,7 +325,8 @@ def node_heartbeat(node_id: str, req: NodeHeartbeatRequest):
 
 
 @router.delete("/{node_id}")
-def unregister_node(node_id: str):
+def unregister_node(node_id: str, request: Request):
+    _check_node_identity(request, node_id)
     node = registry.get_node(node_id)
     registry.unregister(node_id, dismiss=True)
     manager.send_node_offline(node_id, org_id=node.org_id if node else None)
@@ -286,14 +334,19 @@ def unregister_node(node_id: str):
 
 
 @router.get("")
-def list_nodes():
-    """List all registered nodes."""
-    return [n.to_dict() for n in registry.list_nodes()]
+def list_nodes(request: Request):
+    """List registered nodes, filtered to the caller's org."""
+    caller_org = getattr(request.state, "node_org_id", None)
+    nodes = registry.list_nodes()
+    if caller_org:
+        nodes = [n for n in nodes if n.org_id == caller_org or n.visibility == "shared"]
+    return [n.to_dict() for n in nodes]
 
 
 @router.get("/{node_id}/health")
-def get_node_health(node_id: str):
+def get_node_health(node_id: str, request: Request):
     """Get health history for a node (last 60 snapshots, ~10 min at 10s intervals)."""
+    _check_node_identity(request, node_id)
     node = registry.get_node(node_id)
     if not node:
         raise HTTPException(status_code=404, detail=f"Node '{node_id}' not found")
@@ -301,8 +354,9 @@ def get_node_health(node_id: str):
 
 
 @router.get("/{node_id}/logs")
-def get_node_logs(node_id: str):
+def get_node_logs(node_id: str, request: Request):
     """Get recent log lines from a node."""
+    _check_node_identity(request, node_id)
     node = registry.get_node(node_id)
     if not node:
         raise HTTPException(status_code=404, detail=f"Node '{node_id}' not found")
@@ -319,32 +373,35 @@ class NodeScheduleRequest(BaseModel):
 
 
 @router.post("/{node_id}/pause")
-def pause_node(node_id: str):
+def pause_node(node_id: str, request: Request):
     """Pause a node — it won't receive new jobs until resumed."""
+    _check_node_identity(request, node_id)
     node = registry.get_node(node_id)
     if not node:
         raise HTTPException(status_code=404, detail=f"Node '{node_id}' not found")
     node.paused = True
     _save_node_config(node_id, node)
-    manager.send_node_update(node.to_dict())
+    manager.send_node_update(node.to_dict(), org_id=node.org_id)
     return {"status": "paused"}
 
 
 @router.post("/{node_id}/resume")
-def resume_node(node_id: str):
+def resume_node(node_id: str, request: Request):
     """Resume a paused node."""
+    _check_node_identity(request, node_id)
     node = registry.get_node(node_id)
     if not node:
         raise HTTPException(status_code=404, detail=f"Node '{node_id}' not found")
     node.paused = False
     _save_node_config(node_id, node)
-    manager.send_node_update(node.to_dict())
+    manager.send_node_update(node.to_dict(), org_id=node.org_id)
     return {"status": "resumed"}
 
 
 @router.get("/{node_id}/schedule")
-def get_node_schedule(node_id: str):
+def get_node_schedule(node_id: str, request: Request):
     """Get a node's active hours schedule."""
+    _check_node_identity(request, node_id)
     node = registry.get_node(node_id)
     if not node:
         raise HTTPException(status_code=404, detail=f"Node '{node_id}' not found")
@@ -352,14 +409,15 @@ def get_node_schedule(node_id: str):
 
 
 @router.put("/{node_id}/schedule")
-def set_node_schedule(node_id: str, req: NodeScheduleRequest):
+def set_node_schedule(node_id: str, req: NodeScheduleRequest, request: Request):
     """Set a node's active hours schedule."""
+    _check_node_identity(request, node_id)
     node = registry.get_node(node_id)
     if not node:
         raise HTTPException(status_code=404, detail=f"Node '{node_id}' not found")
     node.schedule = NodeSchedule(enabled=req.enabled, start=req.start, end=req.end)
     _save_node_config(node_id, node)
-    manager.send_node_update(node.to_dict())
+    manager.send_node_update(node.to_dict(), org_id=node.org_id)
     return node.schedule.to_dict()
 
 
@@ -368,14 +426,15 @@ class AcceptedTypesRequest(BaseModel):
 
 
 @router.put("/{node_id}/accepted-types")
-def set_accepted_types(node_id: str, req: AcceptedTypesRequest):
+def set_accepted_types(node_id: str, req: AcceptedTypesRequest, request: Request):
     """Set which job types a node will accept. Empty list = all types."""
+    _check_node_identity(request, node_id)
     node = registry.get_node(node_id)
     if not node:
         raise HTTPException(status_code=404, detail=f"Node '{node_id}' not found")
     node.accepted_types = req.accepted_types
     _save_node_config(node_id, node)
-    manager.send_node_update(node.to_dict())
+    manager.send_node_update(node.to_dict(), org_id=node.org_id)
     return {"accepted_types": node.accepted_types}
 
 
@@ -383,15 +442,16 @@ def set_accepted_types(node_id: str, req: AcceptedTypesRequest):
 
 
 @router.get("/{node_id}/next-job")
-def get_next_job(node_id: str):
+async def get_next_job(node_id: str, request: Request):
     """Get the next available job for a node to process.
 
     Uses reputation-weighted dispatch: low-reputation nodes are delayed
     slightly so higher-reputation nodes claim jobs first. This naturally
     routes work to faster, more reliable nodes without a complex scheduler.
     """
-    import time as _time
+    import asyncio as _asyncio
 
+    _check_node_identity(request, node_id)
     node = registry.get_node(node_id)
     if not node or not node.is_alive:
         raise HTTPException(status_code=404, detail="Node not registered or offline")
@@ -408,11 +468,16 @@ def get_next_job(node_id: str):
         # Only apply delay after enough history to judge
         delay = max(0.0, (100 - rep.score) / 100.0)  # 0-1 second
         if delay > 0.05:
-            _time.sleep(delay)
+            await _asyncio.sleep(delay)
 
     queue = get_queue()
     # Org isolation (CRKY-19): private nodes only claim jobs from their org.
     # Shared nodes (visibility=shared) can claim from any org.
+    # Org-less nodes in multi-tenant mode cannot claim any jobs.
+    from ..auth import AUTH_ENABLED
+
+    if AUTH_ENABLED and not node.org_id and node.visibility != "shared":
+        return {"job": None, "reason": "no_org"}
     claim_org = node.org_id if node.visibility != "shared" else None
     job = queue.claim_job(node_id, accepted_types=node.accepted_types or None, org_id=claim_org)
     if job is None:
@@ -425,7 +490,7 @@ def get_next_job(node_id: str):
     # Build job payload with file info
     clip = None
     service = get_service()
-    clips = service.scan_clips(_clips_mod._clips_dir)
+    clips = service.scan_clips(_node_clips_dir(node_id))
     for c in clips:
         if c.name == job.clip_name:
             clip = c
@@ -448,8 +513,9 @@ def get_next_job(node_id: str):
 
 
 @router.post("/{node_id}/job-progress")
-def report_job_progress(node_id: str, job_id: str, current: int, total: int):
+def report_job_progress(node_id: str, job_id: str, current: int, total: int, request: Request):
     """Node reports job progress."""
+    _check_node_identity(request, node_id)
     queue = get_queue()
     job = queue.find_job_by_id(job_id)
     if job:
@@ -465,8 +531,9 @@ def report_job_progress(node_id: str, job_id: str, current: int, total: int):
 
 
 @router.post("/{node_id}/job-result")
-def report_job_result(node_id: str, req: JobResultRequest):
+def report_job_result(node_id: str, req: JobResultRequest, request: Request):
     """Node reports job completion or failure."""
+    _check_node_identity(request, node_id)
     queue = get_queue()
     job = queue.find_job_by_id(req.job_id)
     if not job:
@@ -504,8 +571,9 @@ def report_job_result(node_id: str, req: JobResultRequest):
 
         record_job_completed(node_id, job.total_frames, elapsed)
     else:
-        queue.fail_job(job, req.error_message or "Unknown error")
-        manager.send_job_status(job.id, JobStatus.FAILED.value, error=req.error_message, org_id=oid)
+        error_detail = req.error_message or "Unknown error"
+        queue.fail_job(job, error_detail)  # full detail in server-side history
+        manager.send_job_status(job.id, JobStatus.FAILED.value, error="Remote processing error", org_id=oid)
         # Update reputation (CRKY-30)
         from ..node_reputation import record_job_failed
 
@@ -518,7 +586,7 @@ def report_job_result(node_id: str, req: JobResultRequest):
 
     if req.status == "completed":
         service = get_service()
-        _chain_next_pipeline_step(job, queue, _clips_mod._clips_dir, service)
+        _chain_next_pipeline_step(job, queue, _node_clips_dir(node_id), service)
 
     return {"status": "ok"}
 
@@ -527,8 +595,9 @@ def report_job_result(node_id: str, req: JobResultRequest):
 
 
 @router.get("/{node_id}/files/{clip_name}/{pass_name}")
-def list_clip_files(node_id: str, clip_name: str, pass_name: str):
+def list_clip_files(node_id: str, clip_name: str, pass_name: str, request: Request):
     """List files available for download for a specific clip pass."""
+    _check_node_identity(request, node_id)
     _PASS_MAP = {
         "input": ["Frames", "Input"],
         "alpha": ["AlphaHint"],
@@ -541,7 +610,7 @@ def list_clip_files(node_id: str, clip_name: str, pass_name: str):
         raise HTTPException(status_code=400, detail=f"Unknown pass: {pass_name}")
 
     service = get_service()
-    clips = service.scan_clips(_clips_mod._clips_dir)
+    clips = service.scan_clips(_node_clips_dir(node_id))
     clip = next((c for c in clips if c.name == clip_name), None)
     if not clip:
         raise HTTPException(status_code=404, detail=f"Clip '{clip_name}' not found")
@@ -550,9 +619,9 @@ def list_clip_files(node_id: str, clip_name: str, pass_name: str):
         target = os.path.join(clip.root_path, d)
         if os.path.isdir(target):
             files = natsorted(os.listdir(target))
-            return {"directory": d, "files": files, "clip_root": clip.root_path}
+            return {"directory": d, "files": files}
 
-    return {"directory": None, "files": [], "clip_root": clip.root_path}
+    return {"directory": None, "files": []}
 
 
 @router.get("/{node_id}/files/{clip_name}/{pass_name}/bundle")
@@ -560,10 +629,12 @@ def download_clip_bundle(
     node_id: str,
     clip_name: str,
     pass_name: str,
+    request: Request,
     start: int = Query(0),
     end: int = Query(-1),
 ):
     """Download multiple files as a tar stream. Much faster than one-per-file."""
+    _check_node_identity(request, node_id)
     _PASS_MAP = {
         "input": ["Frames", "Input"],
         "alpha": ["AlphaHint"],
@@ -576,7 +647,7 @@ def download_clip_bundle(
         raise HTTPException(status_code=400, detail=f"Unknown pass: {pass_name}")
 
     service = get_service()
-    clips = service.scan_clips(_clips_mod._clips_dir)
+    clips = service.scan_clips(_node_clips_dir(node_id))
     clip = next((c for c in clips if c.name == clip_name), None)
     if not clip:
         raise HTTPException(status_code=404, detail=f"Clip '{clip_name}' not found")
@@ -625,8 +696,9 @@ def download_clip_bundle(
 
 
 @router.get("/{node_id}/files/{clip_name}/{pass_name}/{filename}")
-def download_clip_file(node_id: str, clip_name: str, pass_name: str, filename: str):
+def download_clip_file(node_id: str, clip_name: str, pass_name: str, filename: str, request: Request):
     """Download a single file from a clip pass. Used by nodes without shared storage."""
+    _check_node_identity(request, node_id)
     _PASS_MAP = {
         "input": ["Frames", "Input"],
         "alpha": ["AlphaHint"],
@@ -639,7 +711,7 @@ def download_clip_file(node_id: str, clip_name: str, pass_name: str, filename: s
         raise HTTPException(status_code=400, detail=f"Unknown pass: {pass_name}")
 
     service = get_service()
-    clips = service.scan_clips(_clips_mod._clips_dir)
+    clips = service.scan_clips(_node_clips_dir(node_id))
     clip = next((c for c in clips if c.name == clip_name), None)
     if not clip:
         raise HTTPException(status_code=404, detail=f"Clip '{clip_name}' not found")
@@ -655,6 +727,7 @@ def download_clip_file(node_id: str, clip_name: str, pass_name: str, filename: s
 @router.post("/{node_id}/files/{clip_name}/{pass_name}/bundle")
 async def upload_result_bundle(node_id: str, clip_name: str, pass_name: str, request: Request):
     """Upload multiple result files as a tar stream. Much faster than one-per-file."""
+    _check_node_identity(request, node_id)
     _OUTPUT_MAP = {
         "fg": "Output/FG",
         "matte": "Output/Matte",
@@ -668,7 +741,7 @@ async def upload_result_bundle(node_id: str, clip_name: str, pass_name: str, req
         raise HTTPException(status_code=400, detail=f"Unknown output pass: {pass_name}")
 
     service = get_service()
-    clips = service.scan_clips(_clips_mod._clips_dir)
+    clips = service.scan_clips(_node_clips_dir(node_id))
     clip = next((c for c in clips if c.name == clip_name), None)
     if not clip:
         raise HTTPException(status_code=404, detail=f"Clip '{clip_name}' not found")
@@ -676,36 +749,49 @@ async def upload_result_bundle(node_id: str, clip_name: str, pass_name: str, req
     target_dir = os.path.join(clip.root_path, subdir)
     os.makedirs(target_dir, exist_ok=True)
 
-    # Stream the request body to a temp file to avoid holding the entire
-    # tar in memory. No size limit — disk is cheaper than RAM.
+    # Stream the request body to a temp file to avoid holding the entire tar in memory.
     import tempfile as _tempfile
+
+    _MAX_TAR_MEMBER = 500 * 1024 * 1024  # 500MB per extracted file
 
     count = 0
     try:
         with _tempfile.SpooledTemporaryFile(max_size=64 * 1024 * 1024) as tmp:
-            # Stream body chunks to temp file (spills to disk above 64MB)
+            total_bytes = 0
             async for chunk in request.stream():
+                total_bytes += len(chunk)
+                if total_bytes > _MAX_UPLOAD_BYTES:
+                    raise HTTPException(status_code=413, detail="Upload exceeds maximum size")
                 tmp.write(chunk)
             tmp.seek(0)
 
             with tarfile.open(fileobj=tmp, mode="r|") as tar:
                 for member in tar:
                     if member.isfile():
+                        if member.size > _MAX_TAR_MEMBER:
+                            logger.warning(f"Skipping oversized tar member: {member.name} ({member.size} bytes)")
+                            continue
                         dest = safe_join(target_dir, os.path.basename(member.name))
                         extracted = tar.extractfile(member)
                         if extracted:
                             with open(dest, "wb") as f:
                                 f.write(extracted.read())
                             count += 1
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Invalid tar stream: {e}") from e
+        logger.warning(f"Invalid tar upload from node {node_id}: {e}")
+        raise HTTPException(status_code=400, detail="Invalid tar stream") from e
 
     return {"status": "ok", "count": count}
 
 
 @router.post("/{node_id}/files/{clip_name}/{pass_name}/{filename}")
-async def upload_result_file(node_id: str, clip_name: str, pass_name: str, filename: str, file: UploadFile):
+async def upload_result_file(
+    node_id: str, clip_name: str, pass_name: str, filename: str, file: UploadFile, request: Request
+):
     """Upload a result file from a node. Used by nodes without shared storage."""
+    _check_node_identity(request, node_id)
     _OUTPUT_MAP = {
         "fg": "Output/FG",
         "matte": "Output/Matte",
@@ -719,7 +805,7 @@ async def upload_result_file(node_id: str, clip_name: str, pass_name: str, filen
         raise HTTPException(status_code=400, detail=f"Unknown output pass: {pass_name}")
 
     service = get_service()
-    clips = service.scan_clips(_clips_mod._clips_dir)
+    clips = service.scan_clips(_node_clips_dir(node_id))
     clip = next((c for c in clips if c.name == clip_name), None)
     if not clip:
         raise HTTPException(status_code=404, detail=f"Clip '{clip_name}' not found")
@@ -729,10 +815,16 @@ async def upload_result_file(node_id: str, clip_name: str, pass_name: str, filen
 
     fpath = safe_join(target_dir, filename)
     try:
+        total_bytes = 0
         with open(fpath, "wb") as f:
             while chunk := await file.read(8 * 1024 * 1024):
+                total_bytes += len(chunk)
+                if total_bytes > _MAX_UPLOAD_BYTES:
+                    raise HTTPException(status_code=413, detail="Upload exceeds maximum size")
                 f.write(chunk)
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to save file: {e}") from e
+        raise HTTPException(status_code=500, detail=f"Failed to save file") from e
 
-    return {"status": "ok", "path": fpath}
+    return {"status": "ok"}

@@ -74,6 +74,19 @@ def resolve_clips_dir(request: Request, org_id: str | None = None) -> str:
     return org_dir
 
 
+def resolve_node_clips_dir(node_org_id: str | None) -> str:
+    """Resolve the clips directory for a node based on its org_id.
+
+    When auth is disabled or node has no org: returns the base clips dir.
+    When auth is enabled and node has an org: returns base/{org_id}/.
+    """
+    if not AUTH_ENABLED or not _base_clips_dir or not node_org_id:
+        return _base_clips_dir
+    org_dir = os.path.join(_base_clips_dir, node_org_id)
+    os.makedirs(org_dir, exist_ok=True)
+    return org_dir
+
+
 def validate_clip_access(request: Request, clip_root_path: str) -> bool:
     """Check that a clip's path is within the user's accessible org directories.
 
