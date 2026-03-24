@@ -71,12 +71,13 @@ def sync_weights(main_url: str, weight_names: list[str] | None = None) -> None:
             continue
 
         # Try 1: HuggingFace (canonical source, CDN-backed)
+        logger.info(f"Attempting HuggingFace download for '{name}'...")
         try:
             _download_from_hf(name, abs_local)
             if _check_weights_exist(name, abs_local):
                 continue  # Success
         except Exception as e:
-            logger.debug(f"HuggingFace download failed for '{name}': {e}")
+            logger.warning(f"HuggingFace download failed for '{name}': {e}, falling back to server")
 
         # Try 2: Main server (LAN fallback for air-gapped environments)
         _download_from_server(main_url, name, abs_local)
@@ -154,7 +155,11 @@ def _check_weights_exist(name: str, local_dir: str) -> bool:
 
 
 def _download_from_hf(name: str, local_dir: str) -> None:
-    """Download weights from HuggingFace using the Python API."""
+    """Download weights from HuggingFace using the raw HTTP API.
+
+    No pip packages needed — just httpx (already installed).
+    Uses the HF API to list repo files, then downloads each via CDN.
+    """
     hf_info = HF_REPOS.get(name)
     if not hf_info:
         logger.warning(f"No HuggingFace repo configured for '{name}'")
@@ -166,30 +171,70 @@ def _download_from_hf(name: str, local_dir: str) -> None:
 
     repo = hf_info["repo"]
     specific_files = hf_info.get("files")
-
     os.makedirs(local_dir, exist_ok=True)
 
     logger.info(f"Downloading '{name}' from HuggingFace ({repo})...")
-    try:
-        from huggingface_hub import hf_hub_download, snapshot_download
 
-        if specific_files:
-            # Download specific files
-            for fname in specific_files:
-                hf_hub_download(
-                    repo_id=repo,
-                    filename=fname,
-                    local_dir=local_dir,
-                )
-                logger.info(f"  Downloaded {fname}")
-        else:
-            # Download entire repo
-            snapshot_download(
-                repo_id=repo,
-                local_dir=local_dir,
-                local_dir_use_symlinks=False,
-            )
-        logger.info(f"HuggingFace download complete for '{name}'")
-    except Exception as e:
-        logger.error(f"HuggingFace download failed for '{name}': {e}")
-        raise
+    if specific_files:
+        file_list = specific_files
+    else:
+        # List repo contents via HF API
+        api_url = f"https://huggingface.co/api/models/{repo}/tree/main"
+        with httpx.Client(timeout=30) as client:
+            r = client.get(api_url)
+            r.raise_for_status()
+            tree = r.json()
+        # Recursively collect all files
+        file_list = _hf_collect_files(repo, tree)
+
+    downloaded = 0
+    for rel_path in file_list:
+        local_path = os.path.join(local_dir, rel_path)
+        if os.path.isfile(local_path):
+            continue  # already have it
+
+        os.makedirs(os.path.dirname(local_path), exist_ok=True)
+        url = f"https://huggingface.co/{repo}/resolve/main/{rel_path}"
+
+        try:
+            with httpx.Client(timeout=600, follow_redirects=True) as client:
+                with client.stream("GET", url) as resp:
+                    resp.raise_for_status()
+                    with open(local_path + ".part", "wb") as f:
+                        for chunk in resp.iter_bytes(chunk_size=8 * 1024 * 1024):
+                            f.write(chunk)
+            os.replace(local_path + ".part", local_path)
+            downloaded += 1
+            size_mb = os.path.getsize(local_path) / (1024 * 1024)
+            logger.info(f"  [{downloaded}] {rel_path} ({size_mb:.1f} MB)")
+        except Exception as e:
+            # Clean up partial file
+            if os.path.isfile(local_path + ".part"):
+                os.remove(local_path + ".part")
+            logger.error(f"  Failed to download {rel_path}: {e}")
+            raise
+
+    logger.info(f"HuggingFace download complete for '{name}' ({downloaded} files)")
+
+
+def _hf_collect_files(repo: str, tree: list, prefix: str = "") -> list[str]:
+    """Recursively collect file paths from HuggingFace tree API response."""
+    files = []
+    for item in tree:
+        path = item.get("path", "")
+        if item.get("type") == "file":
+            # Skip .gitattributes and other metadata
+            if not path.startswith(".") and not path.endswith(".md"):
+                files.append(path)
+        elif item.get("type") == "directory":
+            # Fetch subtree
+            try:
+                api_url = f"https://huggingface.co/api/models/{repo}/tree/main/{path}"
+                with httpx.Client(timeout=30) as client:
+                    r = client.get(api_url)
+                    r.raise_for_status()
+                    subtree = r.json()
+                files.extend(_hf_collect_files(repo, subtree, path))
+            except Exception:
+                pass
+    return files
