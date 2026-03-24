@@ -141,8 +141,14 @@
 		encodeTotal = 0;
 		encodePollTimer = setInterval(async () => {
 			try {
+				const headers: Record<string, string> = {};
+				const tk = localStorage.getItem('ck:auth_token');
+				if (tk) headers['Authorization'] = `Bearer ${tk}`;
+				const orgId = localStorage.getItem('ck:active_org');
+				if (orgId) headers['X-Org-Id'] = orgId;
 				const res = await fetch(
-					`/api/preview/${encodeURIComponent(clipName)}/${selectedPass}/video/progress?fps=${playbackFps}`
+					`/api/preview/${encodeURIComponent(clipName)}/${selectedPass}/video/progress?fps=${playbackFps}`,
+					{ headers }
 				);
 				const data = await res.json();
 				encodeStatus = data.status;
