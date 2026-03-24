@@ -206,41 +206,97 @@ class FileTransfer:
         logger.info(f"Uploaded {count} files (per-file) for {clip_name}/{pass_name}")
         return count
 
-    def _upload_bundle(self, clip_name: str, pass_name: str, src_dir: str, files: list[str]) -> int:
-        """Upload files as a gzip-compressed tar (single HTTP request).
+    # Max compressed bundle size per upload (stay under Cloudflare's 100MB limit)
+    _MAX_BUNDLE_BYTES = 90 * 1024 * 1024
 
-        Compresses in memory to get a Content-Length header, which avoids
-        chunked transfer encoding that Cloudflare can kill mid-stream.
+    def _upload_bundle(self, clip_name: str, pass_name: str, src_dir: str, files: list[str]) -> int:
+        """Upload files as gzip-compressed tar chunks.
+
+        Splits into multiple uploads if the compressed size exceeds 90MB
+        (Cloudflare's 100MB upload limit). Each chunk is a complete tar
+        that the server extracts independently.
         """
         import gzip
 
-        # Build tar in memory, then gzip it — gives us a known Content-Length
-        # which is much more reliable through Cloudflare than chunked streaming.
+        # Build tar in memory and check size — split into chunks if needed
+        chunks = self._build_tar_chunks(src_dir, files)
+
+        total_count = 0
+        total_bytes = 0
+        url = self._url(f"{clip_name}/{pass_name}/bundle")
+
+        with _transfer_semaphore, httpx.Client(timeout=self.timeout, headers=self._headers) as client:
+            for i, compressed in enumerate(chunks):
+                total_bytes += len(compressed)
+                r = client.post(
+                    url,
+                    content=compressed,
+                    headers={
+                        **self._headers,
+                        "Content-Type": "application/x-tar",
+                        "Content-Encoding": "gzip",
+                        "Content-Length": str(len(compressed)),
+                    },
+                )
+                r.raise_for_status()
+                data = r.json()
+                total_count += data.get("count", 0)
+
+        mb = total_bytes / (1024 * 1024)
+        chunk_info = f", {len(chunks)} chunks" if len(chunks) > 1 else ""
+        logger.info(f"Uploaded {total_count} files (bundle, {mb:.1f}MB gzip{chunk_info}) for {clip_name}/{pass_name}")
+        return total_count
+
+    def _build_tar_chunks(self, src_dir: str, files: list[str]) -> list[bytes]:
+        """Build gzip-compressed tar chunks, each under _MAX_BUNDLE_BYTES."""
+        import gzip
+
+        # Try single bundle first
         buf = io.BytesIO()
         with tarfile.open(fileobj=buf, mode="w") as tar:
             for fname in files:
                 fpath = os.path.join(src_dir, fname)
                 tar.add(fpath, arcname=fname)
         raw = buf.getvalue()
-        compressed = gzip.compress(raw, compresslevel=1)  # fast compression
+        compressed = gzip.compress(raw, compresslevel=1)
+
+        if len(compressed) <= self._MAX_BUNDLE_BYTES:
+            return [compressed]
+
+        # Too large — split files into chunks that fit
+        logger.debug(f"Bundle too large ({len(compressed) / (1024*1024):.0f}MB), splitting into chunks")
+        chunks = []
+        chunk_files: list[str] = []
+        chunk_raw_size = 0
+
+        # Estimate compression ratio from the full bundle
         ratio = len(raw) / max(1, len(compressed))
-        logger.debug(f"Bundle {clip_name}/{pass_name}: {len(raw) / 1024 / 1024:.1f}MB → {len(compressed) / 1024 / 1024:.1f}MB ({ratio:.1f}x)")
+        raw_limit = int(self._MAX_BUNDLE_BYTES * ratio * 0.9)  # 90% of estimated limit
 
-        url = self._url(f"{clip_name}/{pass_name}/bundle")
-        with _transfer_semaphore, httpx.Client(timeout=self.timeout, headers=self._headers) as client:
-            r = client.post(
-                url,
-                content=compressed,
-                headers={
-                    **self._headers,
-                    "Content-Type": "application/x-tar",
-                    "Content-Encoding": "gzip",
-                    "Content-Length": str(len(compressed)),
-                },
-            )
-            r.raise_for_status()
-            data = r.json()
-            count = data.get("count", len(files))
+        for fname in files:
+            fpath = os.path.join(src_dir, fname)
+            fsize = os.path.getsize(fpath)
 
-        logger.info(f"Uploaded {count} files (bundle, {len(compressed) / 1024 / 1024:.1f}MB gzip) for {clip_name}/{pass_name}")
-        return count
+            if chunk_raw_size + fsize > raw_limit and chunk_files:
+                # Flush current chunk
+                chunks.append(self._compress_chunk(src_dir, chunk_files))
+                chunk_files = []
+                chunk_raw_size = 0
+
+            chunk_files.append(fname)
+            chunk_raw_size += fsize
+
+        if chunk_files:
+            chunks.append(self._compress_chunk(src_dir, chunk_files))
+
+        return chunks
+
+    def _compress_chunk(self, src_dir: str, files: list[str]) -> bytes:
+        """Build and compress a single tar chunk."""
+        import gzip
+
+        buf = io.BytesIO()
+        with tarfile.open(fileobj=buf, mode="w") as tar:
+            for fname in files:
+                tar.add(os.path.join(src_dir, fname), arcname=fname)
+        return gzip.compress(buf.getvalue(), compresslevel=1)

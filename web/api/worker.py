@@ -259,8 +259,9 @@ def _chain_next_pipeline_step(job: GPUJob, queue: GPUJobQueue, clips_dir: str, s
             from .routes.jobs import _build_gvm_jobs
 
             next_jobs = _build_gvm_jobs(job.clip_name, frame_count, extra_params=params)
-    elif state == "READY":
+    elif state == "READY" and job.job_type != JobType.INFERENCE:
         # Alpha done → need inference (shard across available GPUs)
+        # Guard: don't chain inference→inference (clip should be COMPLETE after inference)
         from .routes.jobs import _build_inference_shards
 
         next_jobs = _build_inference_shards(job.clip_name, frame_count, params)
