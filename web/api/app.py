@@ -294,71 +294,71 @@ def create_app() -> FastAPI:
 
     # Health check (CRKY-21)
     @app.get("/api/health")
-    def health_check():
-        """Structured health check for monitoring and load balancers."""
-        import shutil
+    async def health_check(deep: bool = False):
+        """Health check for Docker/load balancers.
+
+        Default (fast): checks worker thread + uptime only. Never blocks.
+        With ?deep=true: also checks database, GoTrue, and disk space.
+        Docker health checks should use the fast path.
+        """
         import time
-        import urllib.request
+
+        from starlette.responses import JSONResponse
 
         checks: dict = {}
         healthy = True
 
-        # Database connectivity
-        try:
-            storage = get_storage()
-            from .database import PostgresBackend
-
-            if isinstance(storage, PostgresBackend):
-                storage.get_setting("_health_check")
-                checks["database"] = {"status": "ok", "backend": "postgres", **storage.pool_stats}
-            else:
-                checks["database"] = {"status": "ok", "backend": "json"}
-        except Exception as e:
-            checks["database"] = {"status": "error", "detail": str(e)}
-            healthy = False
-
-        # GoTrue reachability
-        gotrue_url = os.environ.get("CK_GOTRUE_INTERNAL_URL", os.environ.get("CK_GOTRUE_URL", "")).strip()
-        if gotrue_url:
-            try:
-                req = urllib.request.Request(f"{gotrue_url}/health", method="GET")
-                with urllib.request.urlopen(req, timeout=3):
-                    checks["gotrue"] = {"status": "ok"}
-            except Exception as e:
-                checks["gotrue"] = {"status": "error", "detail": str(e)}
-                healthy = False
-        else:
-            checks["gotrue"] = {"status": "skipped", "detail": "No GoTrue URL configured"}
-
-        # Disk space
-        clips_dir = getattr(app.state, "clips_dir", "")
-        if clips_dir and os.path.isdir(clips_dir):
-            usage = shutil.disk_usage(clips_dir)
-            free_gb = round(usage.free / (1024**3), 1)
-            total_gb = round(usage.total / (1024**3), 1)
-            checks["disk"] = {
-                "status": "ok" if free_gb > 1.0 else "warning",
-                "free_gb": free_gb,
-                "total_gb": total_gb,
-            }
-            if free_gb < 1.0:
-                healthy = False
-        else:
-            checks["disk"] = {"status": "skipped"}
-
-        # Worker thread
+        # Worker thread (instant check)
         worker_thread = getattr(app.state, "worker_thread", None)
         if worker_thread:
-            checks["worker"] = {"status": "ok" if worker_thread.is_alive() else "error"}
-            if not worker_thread.is_alive():
+            alive = worker_thread.is_alive()
+            checks["worker"] = {"status": "ok" if alive else "error"}
+            if not alive:
                 healthy = False
         else:
             checks["worker"] = {"status": "skipped"}
 
-        # Uptime
         checks["uptime_seconds"] = round(time.time() - _app_start_time, 1)
 
-        from starlette.responses import JSONResponse
+        # Deep checks — only when explicitly requested (monitoring dashboards)
+        if deep:
+            import shutil
+
+            # Database
+            try:
+                storage = get_storage()
+                from .database import PostgresBackend
+
+                if isinstance(storage, PostgresBackend):
+                    storage.get_setting("_health_check")
+                    checks["database"] = {"status": "ok", "backend": "postgres", **storage.pool_stats}
+                else:
+                    checks["database"] = {"status": "ok", "backend": "json"}
+            except Exception as e:
+                checks["database"] = {"status": "error", "detail": str(e)}
+                healthy = False
+
+            # GoTrue
+            gotrue_url = os.environ.get("CK_GOTRUE_INTERNAL_URL", os.environ.get("CK_GOTRUE_URL", "")).strip()
+            if gotrue_url:
+                try:
+                    import urllib.request
+
+                    req = urllib.request.Request(f"{gotrue_url}/health", method="GET")
+                    with urllib.request.urlopen(req, timeout=3):
+                        checks["gotrue"] = {"status": "ok"}
+                except Exception as e:
+                    checks["gotrue"] = {"status": "error", "detail": str(e)}
+                    healthy = False
+
+            # Disk
+            clips_dir = getattr(app.state, "clips_dir", "")
+            if clips_dir and os.path.isdir(clips_dir):
+                usage = shutil.disk_usage(clips_dir)
+                free_gb = round(usage.free / (1024**3), 1)
+                checks["disk"] = {"status": "ok" if free_gb > 1.0 else "warning", "free_gb": free_gb}
+                if free_gb < 1.0:
+                    healthy = False
 
         status_code = 200 if healthy else 503
         return JSONResponse(content={"healthy": healthy, "checks": checks}, status_code=status_code)
