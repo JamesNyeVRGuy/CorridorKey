@@ -159,6 +159,7 @@ class NodeInfo:
             "accepted_types": self.accepted_types,
             "cpu_stats": self.cpu_stats,
             "agent_version": self.agent_version,
+            "build_number": self.build_number,
             "version_ok": self.version_ok,
         }
 
@@ -184,6 +185,7 @@ class NodeInfo:
             "accepted_types": [],
             "cpu_stats": {},
             "agent_version": self.agent_version,
+            "build_number": self.build_number,
             "version_ok": self.version_ok,
         }
 
@@ -218,6 +220,8 @@ class NodeRegistry:
                 # Always update org_id from the token (may change if re-registered with different token)
                 if info.org_id:
                     existing.org_id = info.org_id
+                existing.agent_version = info.agent_version
+                existing.build_number = info.build_number
                 existing.status = "online"
                 existing.last_heartbeat = time.time()
                 # Preserve paused and schedule on re-register (set from UI)
