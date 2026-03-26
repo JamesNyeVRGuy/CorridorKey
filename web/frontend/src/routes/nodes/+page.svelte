@@ -29,7 +29,7 @@
 	let showSetupGuide = $state(false);
 	let setupInfo = $state<{ main_url: string; image: string } | null>(null);
 	let gpuVendor = $state<'nvidia' | 'amd'>('nvidia');
-	let nodeImage = $derived(setupInfo ? setupInfo.image.replace(/:latest$/, `:${gpuVendor}`) : '');
+	let nodeImage = $derived(setupInfo ? setupInfo.image.replace(/:[\w.-]+$/, `:${gpuVendor}`) : '');
 	let generatedToken = $state('');
 	let generatedTokenLabel = $state('');
 	let tokenLabel = $state('');
