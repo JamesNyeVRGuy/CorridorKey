@@ -5,8 +5,6 @@ from __future__ import annotations
 import logging
 import uuid
 
-logger = logging.getLogger(__name__)
-
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
@@ -28,6 +26,8 @@ from ..schemas import (
     VideoMaMaJobRequest,
 )
 from ..tier_guard import require_admin, require_member
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/jobs", tags=["jobs"], dependencies=[Depends(require_member)])
 
@@ -163,8 +163,14 @@ def list_jobs(request: Request):
     import time as _time
 
     # Average job duration from recent history
-    recent = [j for j in history if j.status.value == "completed" and j.started_at > 0
-              and j.completed_at > j.started_at and j.completed_at > _time.time() - 7200]
+    recent = [
+        j
+        for j in history
+        if j.status.value == "completed"
+        and j.started_at > 0
+        and j.completed_at > j.started_at
+        and j.completed_at > _time.time() - 7200
+    ]
     avg_duration = (sum(j.completed_at - j.started_at for j in recent) / len(recent)) if recent else 300.0
 
     # Available GPU slots (running jobs = occupied slots)
@@ -255,8 +261,7 @@ def submit_sharded_inference(req: ShardedInferenceRequest, request: Request):
 
     # Remote nodes — only online, not busy, not paused, accepting inference
     online_nodes = [
-        n for n in registry.list_nodes()
-        if n.can_accept_jobs and n.accepts_job_type("inference") and n.status != "busy"
+        n for n in registry.list_nodes() if n.can_accept_jobs and n.accepts_job_type("inference") and n.status != "busy"
     ]
     for node in online_nodes:
         if node.gpus:
@@ -399,6 +404,7 @@ def _gpu_speed_weights(job_type: str) -> dict[str, float]:
                 # Look up the GPU name from the device (local GPU)
                 try:
                     import torch
+
                     if torch.cuda.is_available():
                         gpu_name = torch.cuda.get_device_name(0)
                         fps_by_gpu.setdefault(gpu_name, []).append(fps)
@@ -476,6 +482,7 @@ def _get_available_gpus(job_type: str) -> list[str]:
     if get_local_gpu_enabled():
         try:
             import torch
+
             if torch.cuda.is_available():
                 gpu_names.append(torch.cuda.get_device_name(0))
             else:
@@ -484,8 +491,7 @@ def _get_available_gpus(job_type: str) -> list[str]:
             gpu_names.append("unknown")
 
     online_nodes = [
-        n for n in registry.list_nodes()
-        if n.can_accept_jobs and n.accepts_job_type(job_type) and n.status != "busy"
+        n for n in registry.list_nodes() if n.can_accept_jobs and n.accepts_job_type(job_type) and n.status != "busy"
     ]
     for node in online_nodes:
         if node.gpus:
@@ -527,7 +533,9 @@ def _build_gvm_jobs(clip_name: str, frame_count: int, extra_params: dict | None 
             jobs.append(job)
             cursor += size
         if speed_map:
-            logger.info(f"GVM sharding for '{clip_name}': {sizes} frames across {gpu_names[:num_shards]} (speed-weighted)")
+            logger.info(
+                f"GVM sharding for '{clip_name}': {sizes} frames across {gpu_names[:num_shards]} (speed-weighted)"
+            )
         return jobs
 
     return [GPUJob(job_type=JobType.GVM_ALPHA, clip_name=clip_name, params=params)]
@@ -554,7 +562,7 @@ def _build_inference_shards(clip_name: str, frame_count: int, extra_params: dict
             job = GPUJob(
                 job_type=JobType.INFERENCE,
                 clip_name=clip_name,
-                params={**params, "frame_range": [cursor, cursor + size]},  
+                params={**params, "frame_range": [cursor, cursor + size]},
                 shard_group=group_id,
                 shard_index=i,
                 shard_total=len(sizes),
@@ -562,7 +570,9 @@ def _build_inference_shards(clip_name: str, frame_count: int, extra_params: dict
             jobs.append(job)
             cursor += size
         if speed_map:
-            logger.info(f"Inference sharding for '{clip_name}': {sizes} frames across {gpu_names[:num_shards]} (speed-weighted)")
+            logger.info(
+                f"Inference sharding for '{clip_name}': {sizes} frames across {gpu_names[:num_shards]} (speed-weighted)"
+            )
         return jobs
 
     return [GPUJob(job_type=JobType.INFERENCE, clip_name=clip_name, params=params)]
@@ -666,20 +676,24 @@ def submit_pipeline(req: PipelineJobRequest, request: Request):
             jobs = [GPUJob(job_type=JobType.VIDEO_EXTRACT, clip_name=clip_name, params=pipeline_params)]
         elif state == "RAW":
             if req.alpha_method == "videomama":
-                jobs = [GPUJob(
-                    job_type=JobType.VIDEOMAMA_ALPHA,
-                    clip_name=clip_name,
-                    params={**pipeline_params, "chunk_size": 50},
-                )]
+                jobs = [
+                    GPUJob(
+                        job_type=JobType.VIDEOMAMA_ALPHA,
+                        clip_name=clip_name,
+                        params={**pipeline_params, "chunk_size": 50},
+                    )
+                ]
             else:
                 frame_count = clip.input_asset.frame_count if clip.input_asset else 0
                 jobs = _build_gvm_jobs(clip_name, frame_count, extra_params=pipeline_params)
         elif state == "MASKED":
-            jobs = [GPUJob(
-                job_type=JobType.VIDEOMAMA_ALPHA,
-                clip_name=clip_name,
-                params={**pipeline_params, "chunk_size": 50},
-            )]
+            jobs = [
+                GPUJob(
+                    job_type=JobType.VIDEOMAMA_ALPHA,
+                    clip_name=clip_name,
+                    params={**pipeline_params, "chunk_size": 50},
+                )
+            ]
         elif state in ("READY", "COMPLETE"):
             jobs = [GPUJob(job_type=JobType.INFERENCE, clip_name=clip_name, params=pipeline_params)]
         else:

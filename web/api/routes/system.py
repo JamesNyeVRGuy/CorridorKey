@@ -193,9 +193,6 @@ def set_claim_delay_setting(seconds: float):
     return {"status": "ok", "seconds": seconds}
 
 
-
-
-
 @router.post("/unload", dependencies=[Depends(require_admin)])
 def unload_engines():
     service = get_service()

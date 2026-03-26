@@ -254,8 +254,9 @@ def set_ip_allowlist(org_id: str, req: IPAllowlistRequest, request: Request):
     save_allowlist(org_id, req.cidrs)
     from ..audit import audit_from_request
 
-    audit_from_request("org.ip_allowlist_updated", request, target_type="org", target_id=org_id,
-                       details={"cidrs": req.cidrs})
+    audit_from_request(
+        "org.ip_allowlist_updated", request, target_type="org", target_id=org_id, details={"cidrs": req.cidrs}
+    )
     return {"org_id": org_id, "cidrs": req.cidrs}
 
 

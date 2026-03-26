@@ -168,8 +168,7 @@ class PostgresBackend(StorageBackend):
                         logger.info("Created ck schema and tables")
                     except Exception as schema_err:
                         raise RuntimeError(
-                            f"Cannot create ck schema ({schema_err}). "
-                            "Run deploy/init-db.sql as supabase_admin."
+                            f"Cannot create ck schema ({schema_err}). Run deploy/init-db.sql as supabase_admin."
                         ) from schema_err
                 cur.close()
             except RuntimeError:

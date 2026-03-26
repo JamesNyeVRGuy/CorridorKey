@@ -78,13 +78,22 @@ def _validate_webhook_url(url: str) -> None:
 
     # Block common internal hostnames
     blocked_hosts = {
-        "localhost", "127.0.0.1", "::1", "0.0.0.0",
-        "metadata.google.internal", "metadata",
+        "localhost",
+        "127.0.0.1",
+        "::1",
+        "0.0.0.0",
+        "metadata.google.internal",
+        "metadata",
     }
     # Block Docker-internal service names from compose files
     blocked_prefixes = (
-        "supabase-", "corridorkey-", "postgres", "grafana",
-        "prometheus", "loki", "promtail",
+        "supabase-",
+        "corridorkey-",
+        "postgres",
+        "grafana",
+        "prometheus",
+        "loki",
+        "promtail",
     )
     if hostname in blocked_hosts or any(hostname.startswith(p) for p in blocked_prefixes):
         raise ValueError(f"Webhook URL cannot target internal host: {hostname}")
@@ -105,8 +114,13 @@ def create_webhook(org_id: str, url: str, events: list[str], fmt: str, created_b
     _validate_webhook_url(url)
     hook_id = secrets.token_hex(8)
     hook = Webhook(
-        id=hook_id, org_id=org_id, url=url, events=events,
-        format=fmt, created_by=created_by, created_at=time.time(),
+        id=hook_id,
+        org_id=org_id,
+        url=url,
+        events=events,
+        format=fmt,
+        created_by=created_by,
+        created_at=time.time(),
     )
     hooks = _load_webhooks()
     hooks[hook_id] = hook.to_dict()
@@ -134,16 +148,15 @@ def fire_event(event: str, org_id: str, data: dict[str, Any]) -> None:
     """Fire a webhook event for an org. Non-blocking — runs in a thread."""
     hooks = _load_webhooks()
     matching = [
-        Webhook(**v) for v in hooks.values()
+        Webhook(**v)
+        for v in hooks.values()
         if v.get("org_id") == org_id and v.get("active") and event in v.get("events", [])
     ]
     if not matching:
         return
 
     for hook in matching:
-        threading.Thread(
-            target=_deliver, args=(hook, event, data), daemon=True
-        ).start()
+        threading.Thread(target=_deliver, args=(hook, event, data), daemon=True).start()
 
 
 def _deliver(hook: Webhook, event: str, data: dict[str, Any], retries: int = 3) -> None:
@@ -154,8 +167,10 @@ def _deliver(hook: Webhook, event: str, data: dict[str, Any], retries: int = 3) 
     for attempt in range(retries):
         try:
             req = urllib.request.Request(
-                hook.url, data=json.dumps(payload).encode(),
-                headers=headers, method="POST",
+                hook.url,
+                data=json.dumps(payload).encode(),
+                headers=headers,
+                method="POST",
             )
             with urllib.request.urlopen(req, timeout=10):
                 logger.debug(f"Webhook delivered: {event} -> {hook.url}")
@@ -174,22 +189,22 @@ def _format_payload(fmt: str, event: str, data: dict[str, Any]) -> dict:
     if fmt == "discord":
         color = {"job_completed": 0x5DD879, "job_failed": 0xFF5252, "job_started": 0xFFF203}.get(event, 0x9D9C93)
         return {
-            "embeds": [{
-                "title": event.replace("_", " ").title(),
-                "color": color,
-                "fields": [{"name": k, "value": str(v), "inline": True} for k, v in data.items()],
-                "footer": {"text": "CorridorKey"},
-            }]
+            "embeds": [
+                {
+                    "title": event.replace("_", " ").title(),
+                    "color": color,
+                    "fields": [{"name": k, "value": str(v), "inline": True} for k, v in data.items()],
+                    "footer": {"text": "CorridorKey"},
+                }
+            ]
         }
     elif fmt == "slack":
         return {
             "text": f"*{event.replace('_', ' ').title()}*",
             "blocks": [
                 {"type": "header", "text": {"type": "plain_text", "text": event.replace("_", " ").title()}},
-                {"type": "section", "fields": [
-                    {"type": "mrkdwn", "text": f"*{k}:* {v}"} for k, v in data.items()
-                ]},
-            ]
+                {"type": "section", "fields": [{"type": "mrkdwn", "text": f"*{k}:* {v}"} for k, v in data.items()]},
+            ],
         }
     else:
         return {"event": event, "data": data, "timestamp": time.time()}

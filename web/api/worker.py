@@ -121,7 +121,9 @@ def _can_start_gpu_job() -> bool:
         return True  # non-CUDA (e.g. MLX) — can't check, allow it
     can = free >= _vram_limit_gb
     if not can:
-        logger.warning(f"VRAM check: {free:.1f} GB free < {_vram_limit_gb:.1f} GB required — waiting for VRAM to free up")
+        logger.warning(
+            f"VRAM check: {free:.1f} GB free < {_vram_limit_gb:.1f} GB required — waiting for VRAM to free up"
+        )
     return can
 
 
@@ -234,7 +236,10 @@ def _execute_gpu_job(service: CorridorKeyService, job: GPUJob, clips_dir: str) -
     elif job.job_type == JobType.GVM_ALPHA:
         gvm_frame_range = job.params.get("frame_range")
         service.run_gvm(
-            clip, job=job, on_progress=on_progress, on_warning=on_warning,
+            clip,
+            job=job,
+            on_progress=on_progress,
+            on_warning=on_warning,
             frame_range=tuple(gvm_frame_range) if gvm_frame_range else None,
         )
     elif job.job_type == JobType.VIDEOMAMA_ALPHA:
@@ -290,11 +295,13 @@ def _chain_next_pipeline_step(job: GPUJob, queue: GPUJobQueue, clips_dir: str, s
         # Extraction done → need alpha generation
         alpha_method = params.get("alpha_method", "gvm")
         if alpha_method == "videomama":
-            next_jobs = [GPUJob(
-                job_type=JobType.VIDEOMAMA_ALPHA,
-                clip_name=job.clip_name,
-                params={**params, "chunk_size": 50},
-            )]
+            next_jobs = [
+                GPUJob(
+                    job_type=JobType.VIDEOMAMA_ALPHA,
+                    clip_name=job.clip_name,
+                    params={**params, "chunk_size": 50},
+                )
+            ]
         else:
             from .routes.jobs import _build_gvm_jobs
 
@@ -318,7 +325,7 @@ def _chain_next_pipeline_step(job: GPUJob, queue: GPUJobQueue, clips_dir: str, s
             logger.warning(f"Pipeline chain: credit check failed for '{job.clip_name}': {e}")
             manager.send_job_warning(
                 job.id,
-                f"Pipeline stopped: insufficient GPU credits for next step.",
+                "Pipeline stopped: insufficient GPU credits for next step.",
                 org_id=job.org_id,
             )
             return

@@ -82,8 +82,7 @@ def approve_user(user_id: str, request: Request):
     if STARTER_CREDITS > 0:
         add_contributed(personal_org.org_id, STARTER_CREDITS)
 
-    audit_from_request("user.approved", request, target_type="user", target_id=user_id,
-                       details={"email": user.email})
+    audit_from_request("user.approved", request, target_type="user", target_id=user_id, details={"email": user.email})
     return {"status": "approved", "user": updated.to_dict() if updated else None}
 
 
@@ -99,8 +98,7 @@ def reject_user(user_id: str, request: Request):
         raise HTTPException(status_code=400, detail=f"User is already {user.tier}, not pending")
 
     updated = user_store.set_tier(user_id, "rejected", approved_by=admin.user_id)
-    audit_from_request("user.rejected", request, target_type="user", target_id=user_id,
-                       details={"email": user.email})
+    audit_from_request("user.rejected", request, target_type="user", target_id=user_id, details={"email": user.email})
     return {"status": "rejected", "user": updated.to_dict() if updated else None}
 
 
@@ -128,8 +126,13 @@ def set_user_tier(user_id: str, req: SetTierRequest, request: Request):
         if STARTER_CREDITS > 0:
             add_contributed(personal_org.org_id, STARTER_CREDITS)
 
-    audit_from_request("user.tier_changed", request, target_type="user", target_id=user_id,
-                       details={"old_tier": old_tier, "new_tier": req.tier})
+    audit_from_request(
+        "user.tier_changed",
+        request,
+        target_type="user",
+        target_id=user_id,
+        details={"old_tier": old_tier, "new_tier": req.tier},
+    )
     return {"status": "updated", "user": updated.to_dict() if updated else None}
 
 
@@ -184,8 +187,9 @@ def grant_credits(req: GrantCreditsRequest, request: Request):
     add_contributed(req.org_id, seconds)
 
     action = "credits.granted" if req.hours > 0 else "credits.revoked"
-    audit_from_request(action, request, target_type="org", target_id=req.org_id,
-                       details={"hours": req.hours, "seconds": seconds})
+    audit_from_request(
+        action, request, target_type="org", target_id=req.org_id, details={"hours": req.hours, "seconds": seconds}
+    )
 
     from ..gpu_credits import get_org_credits
 
@@ -393,15 +397,17 @@ def get_audit_log(limit: int = 100, offset: int = 0, action: str | None = None):
         )
         entries = []
         for row in cur.fetchall():
-            entries.append({
-                "id": row[0],
-                "timestamp": row[1].isoformat() if row[1] else None,
-                "actor_user_id": row[2],
-                "action": row[3],
-                "target_type": row[4],
-                "target_id": row[5],
-                "details": row[6],
-                "ip_address": row[7],
-            })
+            entries.append(
+                {
+                    "id": row[0],
+                    "timestamp": row[1].isoformat() if row[1] else None,
+                    "actor_user_id": row[2],
+                    "action": row[3],
+                    "target_type": row[4],
+                    "target_id": row[5],
+                    "details": row[6],
+                    "ip_address": row[7],
+                }
+            )
         cur.close()
         return {"entries": entries, "total": total}

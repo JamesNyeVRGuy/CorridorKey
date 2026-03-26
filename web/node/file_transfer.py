@@ -26,6 +26,7 @@ _transfer_semaphore = threading.Semaphore(2)
 class TransferCancelled(Exception):
     """Raised when a file transfer is cancelled mid-stream."""
 
+
 # Transient HTTP status codes worth retrying (server restart, load balancer hiccup)
 _RETRY_STATUSES = {401, 502, 503, 504}
 _MAX_RETRIES = 3
@@ -42,7 +43,8 @@ def _with_retry(fn, description: str = "request"):
             return fn()
         except httpx.HTTPStatusError as e:
             if e.response.status_code in _RETRY_STATUSES and attempt < _MAX_RETRIES - 1:
-                logger.warning(f"{description}: {e.response.status_code}, retrying in {_RETRY_DELAY}s ({attempt + 1}/{_MAX_RETRIES})")
+                code = e.response.status_code
+                logger.warning(f"{description}: {code}, retry in {_RETRY_DELAY}s ({attempt + 1}/{_MAX_RETRIES})")
                 time.sleep(_RETRY_DELAY)
                 last_err = e
             else:
@@ -319,7 +321,9 @@ class FileTransfer:
             chunk_count = data.get("count", 0)
             total_count += chunk_count
             if len(chunks) > 1:
-                logger.info(f"  Chunk {i + 1}/{len(chunks)}: {len(compressed) / (1024*1024):.0f}MB → {chunk_count} files")
+                logger.info(
+                    f"  Chunk {i + 1}/{len(chunks)}: {len(compressed) / (1024 * 1024):.0f}MB → {chunk_count} files"
+                )
 
         mb = total_bytes / (1024 * 1024)
         chunk_info = f", {len(chunks)} chunks" if len(chunks) > 1 else ""
@@ -368,7 +372,7 @@ class FileTransfer:
         chunks: list[bytes] = []
         total_compressed = 0
 
-        for i, group in enumerate(chunk_groups):
+        for _i, group in enumerate(chunk_groups):
             buf = io.BytesIO()
             with tarfile.open(fileobj=buf, mode="w") as tar:
                 for fname in group:

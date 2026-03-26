@@ -41,9 +41,13 @@ HF_REPOS: dict[str, dict] = {
 # Prevents "already present" false positives from partial downloads.
 _REQUIRED_FILES: dict[str, list[str]] = {
     "corridorkey": ["CorridorKey_v1.0.pth"],
-    "gvm": ["vae/config.json", "vae/diffusion_pytorch_model.safetensors",
-             "unet/config.json", "unet/diffusion_pytorch_model.safetensors",
-             "scheduler/scheduler_config.json"],
+    "gvm": [
+        "vae/config.json",
+        "vae/diffusion_pytorch_model.safetensors",
+        "unet/config.json",
+        "unet/diffusion_pytorch_model.safetensors",
+        "scheduler/scheduler_config.json",
+    ],
     "videomama": ["unet/config.json", "unet/diffusion_pytorch_model.safetensors"],
 }
 
@@ -158,8 +162,8 @@ def _download_from_server(main_url: str, name: str, abs_local: str) -> None:
                                     elapsed = _time.time() - dl_start
                                     speed = written / max(1, elapsed)
                                     logger.info(
-                                        f"  {rel_path}: {written / (1024*1024):.0f}/{total_mb:.0f} MB "
-                                        f"({pct}%, {speed / (1024*1024):.1f} MB/s)"
+                                        f"  {rel_path}: {written / (1024 * 1024):.0f}/{total_mb:.0f} MB "
+                                        f"({pct}%, {speed / (1024 * 1024):.1f} MB/s)"
                                     )
                                     last_pct = pct
                 downloaded += 1
@@ -261,8 +265,8 @@ def _download_from_hf(name: str, local_dir: str) -> None:
                                     elapsed = _time.time() - dl_start
                                     speed = written / max(1, elapsed)
                                     logger.info(
-                                        f"  {rel_path}: {written / (1024*1024):.0f}/{total_mb:.0f} MB "
-                                        f"({pct}%, {speed / (1024*1024):.1f} MB/s)"
+                                        f"  {rel_path}: {written / (1024 * 1024):.0f}/{total_mb:.0f} MB "
+                                        f"({pct}%, {speed / (1024 * 1024):.1f} MB/s)"
                                     )
                                     last_pct = pct
             os.replace(local_path + ".part", local_path)

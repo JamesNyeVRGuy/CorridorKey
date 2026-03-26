@@ -34,7 +34,9 @@ def _get_local_version() -> str:
 
         result = subprocess.run(
             ["git", "rev-parse", "--short", "HEAD"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True,
+            text=True,
+            timeout=5,
         )
         return result.stdout.strip() if result.returncode == 0 else "unknown"
     except Exception:
@@ -48,7 +50,9 @@ def _get_local_build_number() -> int:
 
         result = subprocess.run(
             ["git", "log", "-1", "--format=%ct"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True,
+            text=True,
+            timeout=5,
         )
         return int(result.stdout.strip()) if result.returncode == 0 else 0
     except Exception:
@@ -321,7 +325,8 @@ class NodeAgent:
             out_cfg = job_data.get("params", {}).get("output_config", {})
             enabled_outputs = out_cfg.get("enabled_outputs") or None
             self._upload_results(
-                clip_name, clips_dir,
+                clip_name,
+                clips_dir,
                 job_type=job_data.get("job_type", ""),
                 job_id=job_id,
                 enabled_outputs=enabled_outputs,
@@ -381,14 +386,22 @@ class NodeAgent:
                 t.join()
         elif passes:
             self.file_transfer.download_pass(
-                clip_name, passes[0][0], clip_dir, frame_range=passes[0][1], is_cancelled=cancel_fn,
+                clip_name,
+                passes[0][0],
+                clip_dir,
+                frame_range=passes[0][1],
+                is_cancelled=cancel_fn,
             )
 
         return base_dir
 
     def _upload_results(
-        self, clip_name: str, clips_dir: str, job_type: str = "",
-        job_id: str = "", enabled_outputs: list[str] | None = None,
+        self,
+        clip_name: str,
+        clips_dir: str,
+        job_type: str = "",
+        job_id: str = "",
+        enabled_outputs: list[str] | None = None,
     ) -> None:
         """Upload output files back to the main machine. Checks cancellation between passes."""
         clip_dir = os.path.join(clips_dir, clip_name)
@@ -488,7 +501,10 @@ class NodeAgent:
             elif job_type == JobType.GVM_ALPHA:
                 gvm_frame_range = params.get("frame_range")
                 service.run_gvm(
-                    clip, job=job, on_progress=on_progress, on_warning=on_warning,
+                    clip,
+                    job=job,
+                    on_progress=on_progress,
+                    on_warning=on_warning,
                     frame_range=tuple(gvm_frame_range) if gvm_frame_range else None,
                 )
             elif job_type == JobType.VIDEOMAMA_ALPHA:

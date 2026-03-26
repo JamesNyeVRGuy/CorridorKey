@@ -263,7 +263,9 @@ def register_node(req: NodeRegisterRequest, request: Request):
     # Org from per-node token takes precedence; legacy auth cannot self-assign org
     org_id = getattr(request.state, "node_org_id", None)
     if not org_id and req.org_id:
-        logger.warning(f"Node {req.name} ({req.node_id}) attempted org_id override ({req.org_id}) without per-node token — ignored")
+        logger.warning(
+            f"Node {req.name} ({req.node_id}) attempted org_id override ({req.org_id}) without per-node token — ignored"
+        )
     gpu_slots = [
         GPUSlot(index=g.index, name=g.name, vram_total_gb=g.vram_total_gb, vram_free_gb=g.vram_free_gb)
         for g in req.gpus
@@ -293,6 +295,7 @@ def register_node(req: NodeRegisterRequest, request: Request):
     # Associate the per-node token with this node_id
     if node_token:
         from ..node_tokens import get_node_token_store
+
         get_node_token_store().mark_used_by_node(node_token, req.node_id)
     # Re-fetch to get the merged state (register preserves UI-set fields on re-register)
     node = registry.get_node(req.node_id)
@@ -745,7 +748,9 @@ def download_clip_bundle(
 
 
 @router.get("/{node_id}/files/{clip_name}/{pass_name}/{filename}")
-def download_clip_file(node_id: str, clip_name: str, pass_name: str, filename: str, request: Request, job_id: str | None = Query(None)):
+def download_clip_file(
+    node_id: str, clip_name: str, pass_name: str, filename: str, request: Request, job_id: str | None = Query(None)
+):
     """Download a single file from a clip pass. Used by nodes without shared storage."""
     _check_node_identity(request, node_id)
     _PASS_MAP = {
@@ -774,7 +779,9 @@ def download_clip_file(node_id: str, clip_name: str, pass_name: str, filename: s
 
 
 @router.post("/{node_id}/files/{clip_name}/{pass_name}/bundle")
-async def upload_result_bundle(node_id: str, clip_name: str, pass_name: str, request: Request, job_id: str | None = Query(None)):
+async def upload_result_bundle(
+    node_id: str, clip_name: str, pass_name: str, request: Request, job_id: str | None = Query(None)
+):
     """Upload multiple result files as a tar stream. Much faster than one-per-file."""
     _check_node_identity(request, node_id)
     _OUTPUT_MAP = {
@@ -852,7 +859,13 @@ async def upload_result_bundle(node_id: str, clip_name: str, pass_name: str, req
 
 @router.post("/{node_id}/files/{clip_name}/{pass_name}/{filename}")
 async def upload_result_file(
-    node_id: str, clip_name: str, pass_name: str, filename: str, file: UploadFile, request: Request, job_id: str | None = Query(None)
+    node_id: str,
+    clip_name: str,
+    pass_name: str,
+    filename: str,
+    file: UploadFile,
+    request: Request,
+    job_id: str | None = Query(None),
 ):
     """Upload a result file from a node. Used by nodes without shared storage."""
     _check_node_identity(request, node_id)
@@ -889,6 +902,6 @@ async def upload_result_file(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to save file") from e
+        raise HTTPException(status_code=500, detail="Failed to save file") from e
 
     return {"status": "ok"}

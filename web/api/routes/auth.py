@@ -136,7 +136,9 @@ def login_proxy(req: LoginRequest):
     """
     import urllib.request
 
-    gotrue_url = os.environ.get("CK_GOTRUE_INTERNAL_URL", os.environ.get("CK_GOTRUE_URL", "http://localhost:54324")).strip()
+    gotrue_url = os.environ.get(
+        "CK_GOTRUE_INTERNAL_URL", os.environ.get("CK_GOTRUE_URL", "http://localhost:54324")
+    ).strip()
     body = json.dumps({"email": req.email, "password": req.password}).encode()
     try:
         gotrue_req = urllib.request.Request(
@@ -149,8 +151,12 @@ def login_proxy(req: LoginRequest):
             data = json.loads(resp.read())
         # Only forward safe fields — don't leak GoTrue internals
         safe_keys = {
-            "access_token", "refresh_token", "token_type", "expires_in",
-            "expires_at", "user",
+            "access_token",
+            "refresh_token",
+            "token_type",
+            "expires_in",
+            "expires_at",
+            "user",
         }
         return {k: v for k, v in data.items() if k in safe_keys}
     except Exception as e:
@@ -163,7 +169,9 @@ def refresh_proxy(request: Request):
     """Proxy token refresh through the server."""
     import urllib.request
 
-    gotrue_url = os.environ.get("CK_GOTRUE_INTERNAL_URL", os.environ.get("CK_GOTRUE_URL", "http://localhost:54324")).strip()
+    gotrue_url = os.environ.get(
+        "CK_GOTRUE_INTERNAL_URL", os.environ.get("CK_GOTRUE_URL", "http://localhost:54324")
+    ).strip()
     try:
         refresh_token = request.headers.get("X-Refresh-Token", "")
         if not refresh_token:
@@ -178,8 +186,12 @@ def refresh_proxy(request: Request):
         with urllib.request.urlopen(gotrue_req, timeout=10) as resp:
             data = json.loads(resp.read())
         safe_keys = {
-            "access_token", "refresh_token", "token_type", "expires_in",
-            "expires_at", "user",
+            "access_token",
+            "refresh_token",
+            "token_type",
+            "expires_in",
+            "expires_at",
+            "user",
         }
         return {k: v for k, v in data.items() if k in safe_keys}
     except HTTPException:
@@ -204,7 +216,9 @@ def change_password(req: ChangePasswordRequest, request: Request):
 
     from ..auth import _decode_jwt
 
-    gotrue_url = os.environ.get("CK_GOTRUE_INTERNAL_URL", os.environ.get("CK_GOTRUE_URL", "http://localhost:54324")).strip()
+    gotrue_url = os.environ.get(
+        "CK_GOTRUE_INTERNAL_URL", os.environ.get("CK_GOTRUE_URL", "http://localhost:54324")
+    ).strip()
     auth_header = request.headers.get("Authorization", "")
     if not auth_header or not auth_header.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Authorization required")
@@ -330,7 +344,9 @@ def signup_with_invite(req: SignupRequest):
     storage.save_invite_token(req.invite_token, invite)
 
     # Create user via GoTrue admin API (use internal URL for server-to-server)
-    gotrue_url = os.environ.get("CK_GOTRUE_INTERNAL_URL", os.environ.get("CK_GOTRUE_URL", "http://localhost:54324")).strip()
+    gotrue_url = os.environ.get(
+        "CK_GOTRUE_INTERNAL_URL", os.environ.get("CK_GOTRUE_URL", "http://localhost:54324")
+    ).strip()
     service_key = os.environ.get("CK_SUPABASE_SERVICE_KEY", "").strip()
 
     try:
@@ -338,13 +354,15 @@ def signup_with_invite(req: SignupRequest):
             # Use admin API (bypasses DISABLE_SIGNUP)
             import urllib.request
 
-            admin_body = json.dumps({
-                "email": req.email,
-                "password": req.password,
-                "email_confirm": True,
-                "app_metadata": {"tier": "pending"},
-                "user_metadata": {"name": req.name},
-            }).encode()
+            admin_body = json.dumps(
+                {
+                    "email": req.email,
+                    "password": req.password,
+                    "email_confirm": True,
+                    "app_metadata": {"tier": "pending"},
+                    "user_metadata": {"name": req.name},
+                }
+            ).encode()
             admin_req = urllib.request.Request(
                 f"{gotrue_url}/admin/users",
                 data=admin_body,

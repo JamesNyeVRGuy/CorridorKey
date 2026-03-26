@@ -153,8 +153,7 @@ def prometheus_metrics(request: Request):
     lines.append(_header("corridorkey_job_avg_fps", "Average frames per second by job type"))
     fps_by_type: dict[str, list[float]] = {}
     for j in history:
-        if (j.status.value == "completed" and j.total_frames > 0
-                and j.started_at > 0 and j.completed_at > j.started_at):
+        if j.status.value == "completed" and j.total_frames > 0 and j.started_at > 0 and j.completed_at > j.started_at:
             dur = j.completed_at - j.started_at
             fps = j.total_frames / dur
             if 0 < fps < 100:
@@ -164,16 +163,19 @@ def prometheus_metrics(request: Request):
         lines.append(_l("corridorkey_job_avg_fps", round(avg_fps, 3), f'type="{jtype}"'))
 
     # Queue wait time (avg seconds from submission to start for recent jobs)
-    wait_times: list[float] = []
     for j in history:
         if j.status.value == "completed" and j.started_at > 0 and j.completed_at > cutoff_1h:
             # started_at - queued_at estimate: use started_at as proxy
             pass  # TODO: need queued_at timestamp on GPUJob
     # For now, just track currently queued jobs' wait time
     if queued:
-        oldest_queued = min(j.started_at for j in queued if j.started_at > 0) if any(j.started_at > 0 for j in queued) else 0
+        oldest_queued = (
+            min(j.started_at for j in queued if j.started_at > 0) if any(j.started_at > 0 for j in queued) else 0
+        )
         if oldest_queued > 0:
-            lines.append(_m("corridorkey_queue_oldest_seconds", now - oldest_queued, "Age of oldest queued job in seconds"))
+            lines.append(
+                _m("corridorkey_queue_oldest_seconds", now - oldest_queued, "Age of oldest queued job in seconds")
+            )
 
     # ── Nodes ───────────────────────────────────────────────────
     nodes = registry.list_nodes()
@@ -254,7 +256,9 @@ def prometheus_metrics(request: Request):
         if all_credits:
             lines.append(_header("corridorkey_credits_contributed_hours", "GPU hours contributed by org", "counter"))
             lines.append(_header("corridorkey_credits_consumed_hours", "GPU hours consumed by org", "counter"))
-            lines.append(_header("corridorkey_credits_balance_hours", "GPU credit balance in hours (contributed - consumed)"))
+            lines.append(
+                _header("corridorkey_credits_balance_hours", "GPU credit balance in hours (contributed - consumed)")
+            )
             for c in all_credits:
                 org = org_store.get_org(c.org_id)
                 name = org.name if org else c.org_id[:8]
@@ -267,11 +271,11 @@ def prometheus_metrics(request: Request):
 
     # ── Storage ─────────────────────────────────────────────────
     try:
+        from .orgs import get_org_store as _get_org_store
         from .storage_quota import get_org_disk_usage, get_org_quota
 
-        from .orgs import get_org_store as _get_org_store
         os2 = _get_org_store()
-        all_orgs = os2.list_all_orgs() if hasattr(os2, 'list_all_orgs') else []
+        all_orgs = os2.list_all_orgs() if hasattr(os2, "list_all_orgs") else []
         if all_orgs:
             lines.append(_header("corridorkey_storage_used_gb", "Storage used by org in GB"))
             lines.append(_header("corridorkey_storage_quota_gb", "Storage quota for org in GB"))
@@ -279,8 +283,8 @@ def prometheus_metrics(request: Request):
                 used = get_org_disk_usage(org.org_id)
                 quota = get_org_quota(org.org_id)
                 ol = f'org="{org.name}",org_id="{org.org_id}"'
-                lines.append(_l("corridorkey_storage_used_gb", round(used / (1024 ** 3), 2), ol))
-                lines.append(_l("corridorkey_storage_quota_gb", round(quota / (1024 ** 3), 1), ol))
+                lines.append(_l("corridorkey_storage_used_gb", round(used / (1024**3), 2), ol))
+                lines.append(_l("corridorkey_storage_quota_gb", round(quota / (1024**3), 1), ol))
     except Exception:
         pass
 
@@ -291,9 +295,11 @@ def prometheus_metrics(request: Request):
         clips_dir = os.environ.get("CK_CLIPS_DIR", "").strip() or projects_root()
         if os.path.isdir(clips_dir):
             usage = shutil.disk_usage(clips_dir)
-            lines.append(_m("corridorkey_disk_free_gb", round(usage.free / (1024 ** 3), 2), "Free disk space in GB"))
-            lines.append(_m("corridorkey_disk_total_gb", round(usage.total / (1024 ** 3), 2), "Total disk space in GB"))
-            lines.append(_m("corridorkey_disk_used_percent", round((usage.used / usage.total) * 100, 1), "Disk usage percent"))
+            lines.append(_m("corridorkey_disk_free_gb", round(usage.free / (1024**3), 2), "Free disk space in GB"))
+            lines.append(_m("corridorkey_disk_total_gb", round(usage.total / (1024**3), 2), "Total disk space in GB"))
+            lines.append(
+                _m("corridorkey_disk_used_percent", round((usage.used / usage.total) * 100, 1), "Disk usage percent")
+            )
     except Exception:
         pass
 
@@ -301,9 +307,10 @@ def prometheus_metrics(request: Request):
     try:
         from .version import BUILD_COMMIT, BUILD_NUMBER, VERSION_STRING
 
-        lines.append(f'# HELP corridorkey_build_info Server build information\n')
-        lines.append(f'# TYPE corridorkey_build_info gauge\n')
-        lines.append(f'corridorkey_build_info{{version="{VERSION_STRING}",commit="{BUILD_COMMIT}",build_number="{BUILD_NUMBER}"}} 1\n')
+        lines.append("# HELP corridorkey_build_info Server build information\n")
+        lines.append("# TYPE corridorkey_build_info gauge\n")
+        labels = f'version="{VERSION_STRING}",commit="{BUILD_COMMIT}",build_number="{BUILD_NUMBER}"'
+        lines.append(f"corridorkey_build_info{{{labels}}} 1\n")
     except Exception:
         pass
 

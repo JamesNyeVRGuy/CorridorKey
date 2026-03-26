@@ -53,7 +53,8 @@ def estimate_gpu_seconds(job_type: str, frame_count: int) -> float:
     history = queue.history_snapshot
 
     completed = [
-        j for j in history
+        j
+        for j in history
         if j.status.value == "completed"
         and j.job_type.value == job_type
         and j.total_frames > 0

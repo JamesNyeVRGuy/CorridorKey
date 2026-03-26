@@ -20,13 +20,15 @@ class TestWSTokenValidation:
         monkeypatch.setattr("web.api.auth.JWT_SECRET", self.SECRET)
         monkeypatch.setattr("web.api.auth.JWT_ALGORITHMS", self.ALGORITHMS)
 
-        token = self._make_token({
-            "sub": "user-1",
-            "email": "a@b.com",
-            "aud": "authenticated",
-            "exp": int(time.time()) + 3600,
-            "app_metadata": {"tier": "member", "org_ids": ["org-1"]},
-        })
+        token = self._make_token(
+            {
+                "sub": "user-1",
+                "email": "a@b.com",
+                "aud": "authenticated",
+                "exp": int(time.time()) + 3600,
+                "app_metadata": {"tier": "member", "org_ids": ["org-1"]},
+            }
+        )
         claims = ws._validate_ws_token(token)
         assert claims is not None
         assert claims["sub"] == "user-1"
@@ -38,11 +40,13 @@ class TestWSTokenValidation:
         monkeypatch.setattr("web.api.auth.JWT_SECRET", self.SECRET)
         monkeypatch.setattr("web.api.auth.JWT_ALGORITHMS", self.ALGORITHMS)
 
-        token = self._make_token({
-            "sub": "user-1",
-            "aud": "authenticated",
-            "exp": int(time.time()) - 3600,
-        })
+        token = self._make_token(
+            {
+                "sub": "user-1",
+                "aud": "authenticated",
+                "exp": int(time.time()) - 3600,
+            }
+        )
         assert ws._validate_ws_token(token) is None
 
     def test_wrong_secret(self, monkeypatch):
@@ -51,11 +55,14 @@ class TestWSTokenValidation:
         monkeypatch.setattr("web.api.auth.JWT_SECRET", self.SECRET)
         monkeypatch.setattr("web.api.auth.JWT_ALGORITHMS", self.ALGORITHMS)
 
-        token = self._make_token({
-            "sub": "user-1",
-            "aud": "authenticated",
-            "exp": int(time.time()) + 3600,
-        }, secret="wrong-secret")
+        token = self._make_token(
+            {
+                "sub": "user-1",
+                "aud": "authenticated",
+                "exp": int(time.time()) + 3600,
+            },
+            secret="wrong-secret",
+        )
         assert ws._validate_ws_token(token) is None
 
     def test_wrong_audience(self, monkeypatch):
@@ -64,11 +71,13 @@ class TestWSTokenValidation:
         monkeypatch.setattr("web.api.auth.JWT_SECRET", self.SECRET)
         monkeypatch.setattr("web.api.auth.JWT_ALGORITHMS", self.ALGORITHMS)
 
-        token = self._make_token({
-            "sub": "user-1",
-            "aud": "wrong-audience",
-            "exp": int(time.time()) + 3600,
-        })
+        token = self._make_token(
+            {
+                "sub": "user-1",
+                "aud": "wrong-audience",
+                "exp": int(time.time()) + 3600,
+            }
+        )
         assert ws._validate_ws_token(token) is None
 
     def test_malformed_token(self, monkeypatch):

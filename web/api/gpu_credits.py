@@ -156,8 +156,7 @@ def get_all_credits() -> list[OrgCredits]:
             cur = conn.cursor()
             cur.execute("SELECT org_id, contributed_seconds, consumed_seconds FROM ck.gpu_credits")
             result = [
-                OrgCredits(org_id=row[0], contributed_seconds=row[1], consumed_seconds=row[2])
-                for row in cur.fetchall()
+                OrgCredits(org_id=row[0], contributed_seconds=row[1], consumed_seconds=row[2]) for row in cur.fetchall()
             ]
             cur.close()
             return result

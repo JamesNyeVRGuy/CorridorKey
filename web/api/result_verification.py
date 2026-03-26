@@ -72,10 +72,7 @@ def record_verification_result(
         storage.set_setting("verification_jobs", verifications)
 
     if not passed:
-        logger.warning(
-            f"Verification FAILED for job {original_job_id} "
-            f"(verified by {verification_job_id}): {details}"
-        )
+        logger.warning(f"Verification FAILED for job {original_job_id} (verified by {verification_job_id}): {details}")
 
 
 def compare_frames(frame_a_path: str, frame_b_path: str) -> tuple[bool, float]:

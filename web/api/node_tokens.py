@@ -115,10 +115,7 @@ class NodeTokenStore:
     def list_for_org(self, org_id: str) -> list[NodeToken]:
         """List all tokens for an org."""
         tokens = self._load()
-        return [
-            NodeToken(**self._clean(v)) for v in tokens.values()
-            if v.get("org_id") == org_id
-        ]
+        return [NodeToken(**self._clean(v)) for v in tokens.values() if v.get("org_id") == org_id]
 
     def list_all(self) -> list[NodeToken]:
         """List all tokens (platform admin)."""

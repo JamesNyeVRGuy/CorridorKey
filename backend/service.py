@@ -848,7 +848,6 @@ class CorridorKeyService:
 
     # --- GVM Alpha Generation ---
 
-
     def run_gvm(
         self,
         clip: ClipEntry,
@@ -889,12 +888,18 @@ class CorridorKeyService:
 
         try:
             self._run_gvm_single(
-                gvm, clip, input_path, alpha_dir,
-                job, on_progress, on_warning,
+                gvm,
+                clip,
+                input_path,
+                alpha_dir,
+                job,
+                on_progress,
+                on_warning,
             )
         finally:
             if temp_dir:
                 import shutil
+
                 shutil.rmtree(temp_dir, ignore_errors=True)
 
         # Refresh alpha asset
@@ -978,7 +983,6 @@ class CorridorKeyService:
             if job and job.is_cancelled:
                 raise JobCancelledError(clip.name, 0) from None
             raise CorridorKeyError(f"GVM failed for '{clip.name}': {e}") from e
-
 
     # --- VideoMaMa Alpha Generation ---
 

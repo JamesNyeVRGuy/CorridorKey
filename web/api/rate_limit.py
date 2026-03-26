@@ -27,11 +27,11 @@ logger = logging.getLogger(__name__)
 # Note: a single page load triggers 5-8 API calls, so limits must
 # accommodate normal browsing patterns (page nav, polling, uploads)
 TIER_LIMITS: dict[str, tuple[int, int]] = {
-    "pending": (30, 0),          # Limited — can check status and auth endpoints
-    "member": (300, 30),         # Normal usage (~5 pages/min with full refresh)
-    "contributor": (600, 60),    # Higher limits for power users
-    "org_admin": (600, 60),      # Same as contributor
-    "platform_admin": (0, 0),    # Unlimited
+    "pending": (30, 0),  # Limited — can check status and auth endpoints
+    "member": (300, 30),  # Normal usage (~5 pages/min with full refresh)
+    "contributor": (600, 60),  # Higher limits for power users
+    "org_admin": (600, 60),  # Same as contributor
+    "platform_admin": (0, 0),  # Unlimited
 }
 
 # Default for unknown tiers or unauthenticated
@@ -43,10 +43,10 @@ EXEMPT_PREFIXES = (
     "/api/health",
     "/api/auth/status",
     "/api/auth/me",
-    "/api/nodes/",       # Node agent endpoints (auth via CK_AUTH_TOKEN, not JWT)
+    "/api/nodes/",  # Node agent endpoints (auth via CK_AUTH_TOKEN, not JWT)
     "/api/system/vram",  # VRAM polling (every 10s)
-    "/api/farm",         # Node list refresh on WS events
-    "/api/status",       # Public status page (CRKY-51)
+    "/api/farm",  # Node list refresh on WS events
+    "/api/status",  # Public status page (CRKY-51)
 )
 
 

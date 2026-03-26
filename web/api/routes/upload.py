@@ -65,8 +65,7 @@ async def upload_video(file: UploadFile, request: Request, name: str | None = No
         ext = os.path.splitext(safe_name)[1]
         raise HTTPException(
             status_code=400,
-            detail=f"Not a supported video format (got {ext}). "
-            "Supported: .mp4, .mov, .avi, .mkv, .mxf, .webm, .m4v",
+            detail=f"Not a supported video format (got {ext}). Supported: .mp4, .mov, .avi, .mkv, .mxf, .webm, .m4v",
         )
 
     check_storage_quota(request)
@@ -114,6 +113,7 @@ async def upload_video(file: UploadFile, request: Request, name: str | None = No
                     job = GPUJob(job_type=JobType.VIDEO_EXTRACT, clip_name=clip.name)
                     # Stamp with user/org context so the worker finds the clip in the right org dir
                     from ..auth import get_current_user
+
                     user = get_current_user(request)
                     if user:
                         job.submitted_by = user.user_id
@@ -122,6 +122,7 @@ async def upload_video(file: UploadFile, request: Request, name: str | None = No
                             job.org_id = active_org
                         else:
                             from ..orgs import get_org_store
+
                             user_orgs = get_org_store().list_user_orgs(user.user_id)
                             job.org_id = user_orgs[0].org_id if user_orgs else None
                     if queue.submit(job):

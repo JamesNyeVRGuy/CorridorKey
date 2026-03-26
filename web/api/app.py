@@ -165,10 +165,16 @@ async def lifespan(app: FastAPI):
                 if job.org_id:
                     from .webhooks import fire_event
 
-                    fire_event("job_completed", job.org_id, {
-                        "job_id": job.id, "clip_name": job.clip_name,
-                        "job_type": job.job_type.value, "frames": job.total_frames,
-                    })
+                    fire_event(
+                        "job_completed",
+                        job.org_id,
+                        {
+                            "job_id": job.id,
+                            "clip_name": job.clip_name,
+                            "job_type": job.job_type.value,
+                            "frames": job.total_frames,
+                        },
+                    )
         except Exception:
             pass
 
@@ -182,10 +188,16 @@ async def lifespan(app: FastAPI):
                 if job.org_id:
                     from .webhooks import fire_event
 
-                    fire_event("job_failed", job.org_id, {
-                        "job_id": job.id, "clip_name": job.clip_name,
-                        "job_type": job.job_type.value, "error": _error,
-                    })
+                    fire_event(
+                        "job_failed",
+                        job.org_id,
+                        {
+                            "job_id": job.id,
+                            "clip_name": job.clip_name,
+                            "job_type": job.job_type.value,
+                            "error": _error,
+                        },
+                    )
         except Exception:
             pass
 

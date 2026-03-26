@@ -136,7 +136,7 @@ class GPUJobQueue:
         """Append a job to history, evicting oldest if over capacity. Must hold _lock."""
         self._history.append(job)
         if len(self._history) > self._MAX_HISTORY:
-            self._history = self._history[-self._MAX_HISTORY:]
+            self._history = self._history[-self._MAX_HISTORY :]
 
     def submit(self, job: GPUJob) -> bool:
         """Add a job to the queue. Returns False if duplicate detected.

@@ -43,8 +43,7 @@ def _security_checks() -> None:
     main_url = config.MAIN_URL
     if main_url.startswith("http://") and "localhost" not in main_url and "127.0.0.1" not in main_url:
         log.warning(
-            f"Connecting to {main_url} over plain HTTP. Auth tokens are sent in cleartext. "
-            "Use HTTPS in production."
+            f"Connecting to {main_url} over plain HTTP. Auth tokens are sent in cleartext. Use HTTPS in production."
         )
 
 

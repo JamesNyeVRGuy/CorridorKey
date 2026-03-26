@@ -72,9 +72,21 @@ class NodeReputation:
             "node_id": self.node_id,
             "score": self.score,
             "breakdown": {
-                "success": {"value": round(self.success_rate, 3), "weight": 50, "points": round(self.success_rate * 50, 1)},
-                "speed": {"value": round(self.avg_fps, 2), "weight": 20, "points": round(min(1.0, self.avg_fps / 2.0) * 20, 1)},
-                "uptime": {"value": round(self.uptime_rate, 3), "weight": 30, "points": round(self.uptime_rate * 30, 1)},
+                "success": {
+                    "value": round(self.success_rate, 3),
+                    "weight": 50,
+                    "points": round(self.success_rate * 50, 1),
+                },
+                "speed": {
+                    "value": round(self.avg_fps, 2),
+                    "weight": 20,
+                    "points": round(min(1.0, self.avg_fps / 2.0) * 20, 1),
+                },
+                "uptime": {
+                    "value": round(self.uptime_rate, 3),
+                    "weight": 30,
+                    "points": round(self.uptime_rate * 30, 1),
+                },
                 "security_penalty": {"warnings": self.security_warnings, "points": -self.security_penalty},
             },
             "stats": {

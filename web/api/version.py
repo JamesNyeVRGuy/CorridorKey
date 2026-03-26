@@ -29,7 +29,10 @@ if not BUILD_COMMIT:
     try:
         result = subprocess.run(
             ["git", "rev-parse", "--short", "HEAD"],
-            capture_output=True, text=True, timeout=5, cwd=_repo_root,
+            capture_output=True,
+            text=True,
+            timeout=5,
+            cwd=_repo_root,
         )
         if result.returncode == 0:
             BUILD_COMMIT = result.stdout.strip()
@@ -41,7 +44,10 @@ if not BUILD_COMMIT:
         try:
             result = subprocess.run(
                 ["git", "log", "-1", "--format=%ct"],
-                capture_output=True, text=True, timeout=5, cwd=_repo_root,
+                capture_output=True,
+                text=True,
+                timeout=5,
+                cwd=_repo_root,
             )
             if result.returncode == 0:
                 BUILD_NUMBER = int(result.stdout.strip())
