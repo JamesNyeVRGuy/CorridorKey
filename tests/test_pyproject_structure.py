@@ -122,7 +122,9 @@ class TestConflicts:
         extras_in_groups = [
             {entry["extra"] for entry in group} for group in conflicts if all("extra" in entry for entry in group)
         ]
-        assert {"cuda", "mlx", "rocm"} in extras_in_groups, "Expected a conflict group containing 'cuda', 'mlx', and 'rocm' extras"
+        assert {"cuda", "mlx", "rocm"} in extras_in_groups, (
+            "Expected a conflict group containing 'cuda', 'mlx', and 'rocm' extras"
+        )
 
 
 # ---------------------------------------------------------------------------
