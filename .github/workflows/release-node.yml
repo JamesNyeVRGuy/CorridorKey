@@ -32,10 +32,7 @@ jobs:
         run: |
           pip install pyinstaller
           pip install torch==2.8.0 torchvision==0.23.0 --index-url https://download.pytorch.org/whl/cpu
-          pip install -e .
-
-      - name: Install pystray and desktop-notifier
-        run: pip install pystray desktop-notifier Pillow
+          pip install -e .  # all deps including httpx, pystray, etc.
 
       - name: Build with PyInstaller
         run: pyinstaller web/node/corridorkey-node.spec --noconfirm

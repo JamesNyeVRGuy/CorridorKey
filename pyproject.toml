@@ -40,6 +40,13 @@ dependencies = [
     # CLI framework + terminal output
     "typer>=0.12",
     "rich>=13",
+    # Node agent (HTTP client, config, system stats)
+    "httpx>=0.27",
+    "python-dotenv>=1.0",
+    "psutil>=5.9",
+    # Node tray app (optional — degrades gracefully if missing)
+    "pystray>=0.19",
+    "desktop-notifier>=5.0",
 ]
 
 [project.optional-dependencies]
