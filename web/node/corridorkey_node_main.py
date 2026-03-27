@@ -29,6 +29,14 @@ except ImportError:
 if __name__ == "__main__":
     multiprocessing.freeze_support()
 
+    # Windowed PyInstaller builds (console=False) set stdout/stderr to None.
+    # Any code that writes to them (logging, print, library internals) will
+    # crash with "NoneType has no attribute write". Redirect to devnull.
+    if sys.stdout is None:
+        sys.stdout = open(os.devnull, "w")
+    if sys.stderr is None:
+        sys.stderr = open(os.devnull, "w")
+
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(name)s %(levelname)s %(message)s",

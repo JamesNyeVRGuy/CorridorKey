@@ -215,6 +215,11 @@ class TrayApp:
     def _on_quit(self, icon: Any, item: Any) -> None:
         if self._icon:
             self._icon.stop()
+        # Force-exit the entire process — the agent runs in a daemon thread
+        # and the GUI mainloop won't exit on its own
+        import os
+
+        os._exit(0)
 
     def _build_menu(self) -> pystray.Menu:
         return pystray.Menu(

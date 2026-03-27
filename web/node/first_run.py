@@ -34,27 +34,23 @@ def _config_paths() -> list[str]:
 
 
 def needs_setup() -> bool:
-    """Check if first-run setup is needed."""
-    # Already configured via environment
-    url = os.environ.get("CK_MAIN_URL", "").strip()
+    """Check if first-run setup is needed. Returns True if auth token is missing."""
+    # Already configured via environment with a real token
     token = os.environ.get("CK_AUTH_TOKEN", "").strip()
-    if url and url != "http://localhost:3000" and token:
+    if token:
         return False
 
-    # Config file exists with a real URL AND a non-empty token
+    # Check all config file locations for a non-empty token
     for path in _config_paths():
         if os.path.isfile(path):
             try:
-                vals = {}
                 with open(path) as f:
                     for line in f:
-                        if "=" in line:
-                            k, v = line.strip().split("=", 1)
-                            vals[k] = v
-                url = vals.get("CK_MAIN_URL", "")
-                token = vals.get("CK_AUTH_TOKEN", "")
-                if url and "localhost:3000" not in url and token:
-                    return False
+                        line = line.strip()
+                        if line.startswith("CK_AUTH_TOKEN="):
+                            val = line.split("=", 1)[1].strip()
+                            if val:
+                                return False
             except Exception:
                 pass
 
