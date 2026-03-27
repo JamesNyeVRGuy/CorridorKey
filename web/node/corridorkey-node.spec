@@ -16,11 +16,11 @@ from pathlib import Path
 
 block_cipher = None
 
-# Repo root (spec file is at web/node/corridorkey-node.spec)
-ROOT = Path(SPECPATH).parent.parent.parent
+# Repo root (spec file is at web/node/corridorkey-node.spec → up 2 levels)
+ROOT = Path(SPECPATH).parent.parent
 
 a = Analysis(
-    [str(ROOT / "web" / "node" / "__main__.py")],
+    [str(ROOT / "web" / "node" / "corridorkey_node_main.py")],
     pathex=[str(ROOT)],
     binaries=[],
     datas=[],
