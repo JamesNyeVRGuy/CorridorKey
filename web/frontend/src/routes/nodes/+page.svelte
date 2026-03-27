@@ -448,6 +448,17 @@ volumes:
 						{/if}
 						<p class="code-hint mono">docker compose up -d</p>
 					</div>
+
+					<div class="code-block" style="margin-top: var(--sp-4);">
+						<span class="code-label mono">Or: Standalone Binary (no Docker needed)</span>
+						<div class="download-links">
+							<a href="https://github.com/JamesNyeVRGuy/CorridorKey/releases/latest" target="_blank" rel="noopener" class="download-btn mono">
+								<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 1v9M4 7l4 4 4-4M2 13h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+								DOWNLOAD LATEST
+							</a>
+							<p class="download-hint">Windows installer (.exe) and Linux binary (.tar.gz). Paste your token on first launch.</p>
+						</div>
+					</div>
 				</div>
 
 				<!-- Active Tokens -->
@@ -1758,6 +1769,20 @@ volumes:
 	.vendor-btn.active {
 		background: var(--accent-muted); border-color: var(--accent);
 		color: var(--accent); font-weight: 600;
+	}
+	.download-links {
+		padding: var(--sp-3); background: var(--surface-0);
+		border: 1px solid var(--border); border-radius: var(--radius-sm);
+	}
+	.download-btn {
+		display: inline-flex; align-items: center; gap: var(--sp-2);
+		font-size: 11px; letter-spacing: 0.06em; font-weight: 600;
+		padding: 8px 16px; background: var(--accent); color: #000;
+		border-radius: var(--radius-sm); transition: all 0.15s;
+	}
+	.download-btn:hover { background: #fff; box-shadow: 0 0 12px rgba(255, 242, 3, 0.2); }
+	.download-hint {
+		font-size: 10px; color: var(--text-tertiary); margin-top: var(--sp-2);
 	}
 	.code-block {
 		display: flex; flex-direction: column; gap: 4px;
