@@ -30,6 +30,32 @@ os.environ.setdefault("TORCHINDUCTOR_CACHE_DIR", _inductor_cache)
 logger = logging.getLogger(__name__)
 
 
+def _try_activate_msvc() -> None:
+    """Find and activate MSVC (cl.exe) on Windows if installed but not in PATH.
+
+    Searches common Visual Studio install locations for the latest cl.exe
+    and adds its directory to PATH.
+    """
+    import glob
+
+    # Search for cl.exe in standard VS install paths (newest first)
+    patterns = [
+        r"C:\Program Files\Microsoft Visual Studio\2022\*\VC\Tools\MSVC\*\bin\Hostx64\x64\cl.exe",
+        r"C:\Program Files (x86)\Microsoft Visual Studio\2022\*\VC\Tools\MSVC\*\bin\Hostx64\x64\cl.exe",
+        r"C:\Program Files\Microsoft Visual Studio\2019\*\VC\Tools\MSVC\*\bin\Hostx64\x64\cl.exe",
+    ]
+
+    for pattern in patterns:
+        matches = sorted(glob.glob(pattern), reverse=True)  # newest version first
+        if matches:
+            cl_dir = os.path.dirname(matches[0])
+            os.environ["PATH"] = cl_dir + os.pathsep + os.environ.get("PATH", "")
+            logger.info("Auto-detected MSVC: %s", matches[0])
+            return
+
+    logger.debug("MSVC not found in standard locations")
+
+
 class CorridorKeyEngine:
     def __init__(
         self,
@@ -67,6 +93,10 @@ class CorridorKeyEngine:
         # torch.compile needs: cl.exe (Windows), gcc (Linux), and Triton.
         # Check prerequisites and skip with a helpful message if missing.
         import shutil
+
+        # Auto-detect MSVC on Windows — it's installed but not in PATH by default
+        if sys.platform == "win32" and not shutil.which("cl"):
+            _try_activate_msvc()
 
         skip_reason = None
         if self._is_rocm and sys.platform == "win32":
