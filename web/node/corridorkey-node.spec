@@ -117,7 +117,6 @@ a = Analysis(
         # Torch testing / unused
         "torch.testing",
         "torch.utils.benchmark",
-        "torch.distributed",
         "caffe2",
         # Plotting (not needed at runtime)
         "matplotlib",
