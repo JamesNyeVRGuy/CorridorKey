@@ -605,7 +605,7 @@ volumes:
 						<div class="vram-bar small">
 							<div class="vram-used" style="width: {localCpu.ram_total_gb > 0 ? (localCpu.ram_used_gb / localCpu.ram_total_gb) * 100 : 0}%"></div>
 						</div>
-						<span class="vram-label mono">{localCpu.ram_free_gb.toFixed(1)} / {localCpu.ram_total_gb.toFixed(1)} GB</span>
+						<span class="vram-label mono">{localCpu.ram_free_gb?.toFixed(1) ?? 'N/A'} / {localCpu.ram_total_gb.toFixed(1)} GB</span>
 					</div>
 				</div>
 			{/if}
@@ -901,7 +901,7 @@ volumes:
 									<div class="vram-bar small">
 										<div class="vram-used" style="width: {node.cpu_stats.ram_total_gb > 0 ? (node.cpu_stats.ram_used_gb / node.cpu_stats.ram_total_gb) * 100 : 0}%"></div>
 									</div>
-									<span class="vram-label mono">{node.cpu_stats.ram_free_gb.toFixed(1)}G</span>
+									<span class="vram-label mono">{node.cpu_stats.ram_free_gb?.toFixed(1) ?? 'N/A'}G</span>
 								</div>
 							</div>
 						{/if}
