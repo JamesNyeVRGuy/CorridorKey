@@ -99,6 +99,11 @@ class NodeSettingsWindow:
         self._build_ui()
         self._visible = True
 
+        # Force window to front (PyInstaller frozen builds sometimes show behind other windows)
+        self.root.attributes("-topmost", True)
+        self.root.focus_force()
+        self.root.after(200, lambda: self.root.attributes("-topmost", False))
+
     def _build_ui(self) -> None:
         root = self.root
 
@@ -363,6 +368,9 @@ class NodeSettingsWindow:
         if self.root:
             self.root.deiconify()
             self.root.lift()
+            self.root.attributes("-topmost", True)
+            self.root.focus_force()
+            self.root.after(100, lambda: self.root.attributes("-topmost", False))
             self._visible = True
 
     def hide(self) -> None:

@@ -3,8 +3,10 @@
 import json
 import logging
 import os
-import subprocess
 from dataclasses import dataclass
+from subprocess import TimeoutExpired
+
+from web.shared.subprocess_utils import run_silent as subprocess_run
 
 logger = logging.getLogger(__name__)
 
@@ -123,7 +125,7 @@ class GPUInfo:
 def _enumerate_nvidia() -> list[GPUInfo] | None:
     """Enumerate NVIDIA GPUs via nvidia-smi. Returns None if unavailable."""
     try:
-        result = subprocess.run(
+        result = subprocess_run(
             [
                 "nvidia-smi",
                 "--query-gpu=index,name,memory.total,memory.free",
@@ -148,7 +150,7 @@ def _enumerate_nvidia() -> list[GPUInfo] | None:
                     )
                 )
         return gpus
-    except (FileNotFoundError, subprocess.TimeoutExpired):
+    except (FileNotFoundError, TimeoutExpired):
         return None
 
 
@@ -159,7 +161,7 @@ def _enumerate_amd() -> list[GPUInfo] | None:
     """
     # Try amd-smi (ROCm 6.0+)
     try:
-        result = subprocess.run(
+        result = subprocess_run(
             ["amd-smi", "static", "--json"],
             capture_output=True,
             text=True,
@@ -180,7 +182,7 @@ def _enumerate_amd() -> list[GPUInfo] | None:
             if gpus:
                 # Try to get live VRAM usage from monitor
                 try:
-                    mon = subprocess.run(
+                    mon = subprocess_run(
                         ["amd-smi", "monitor", "--vram", "--json"],
                         capture_output=True,
                         text=True,
@@ -197,12 +199,12 @@ def _enumerate_amd() -> list[GPUInfo] | None:
                 except Exception:
                     pass
                 return gpus
-    except (FileNotFoundError, subprocess.TimeoutExpired, json.JSONDecodeError):
+    except (FileNotFoundError, TimeoutExpired, json.JSONDecodeError):
         pass
 
     # Fallback: rocm-smi (legacy, deprecated but still ships)
     try:
-        result = subprocess.run(
+        result = subprocess_run(
             ["rocm-smi", "--showid", "--showmeminfo", "vram", "--csv"],
             capture_output=True,
             text=True,
@@ -226,7 +228,7 @@ def _enumerate_amd() -> list[GPUInfo] | None:
                     )
             if gpus:
                 return gpus
-    except (FileNotFoundError, subprocess.TimeoutExpired):
+    except (FileNotFoundError, TimeoutExpired):
         pass
 
     return None
@@ -314,7 +316,7 @@ def check_gpu_available(gpu_index: int = 0, min_free_gb: float = 0.0) -> tuple[b
     """
     # Try NVIDIA
     try:
-        result = subprocess.run(
+        result = subprocess_run(
             [
                 "nvidia-smi",
                 f"--id={gpu_index}",
@@ -335,12 +337,12 @@ def check_gpu_available(gpu_index: int = 0, min_free_gb: float = 0.0) -> tuple[b
                 if min_free_gb > 0 and free_gb < min_free_gb:
                     return False, f"GPU {gpu_index} low VRAM ({free_gb:.1f}GB free, need {min_free_gb:.1f}GB)"
                 return True, "ok"
-    except (FileNotFoundError, subprocess.TimeoutExpired):
+    except (FileNotFoundError, TimeoutExpired):
         pass
 
     # Try AMD
     try:
-        result = subprocess.run(
+        result = subprocess_run(
             ["amd-smi", "monitor", "--gpu-use", "--vram", "--json"],
             capture_output=True,
             text=True,
@@ -354,7 +356,7 @@ def check_gpu_available(gpu_index: int = 0, min_free_gb: float = 0.0) -> tuple[b
                 if util_pct > 50:
                     return False, f"GPU {gpu_index} busy ({util_pct}% utilization)"
                 return True, "ok"
-    except (FileNotFoundError, subprocess.TimeoutExpired, Exception):
+    except (FileNotFoundError, TimeoutExpired, Exception):
         pass
 
     return True, "gpu monitoring unavailable"

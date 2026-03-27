@@ -17,6 +17,9 @@ import os
 import platform
 import subprocess
 import sys
+from subprocess import TimeoutExpired
+
+from web.shared.subprocess_utils import popen_silent, run_silent
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +32,7 @@ def detect_gpu_vendor() -> str | None:
     """Detect GPU vendor. Returns 'nvidia', 'amd', or None."""
     # Check NVIDIA
     try:
-        result = subprocess.run(
+        result = run_silent(
             ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
             capture_output=True,
             text=True,
@@ -38,12 +41,12 @@ def detect_gpu_vendor() -> str | None:
         if result.returncode == 0 and result.stdout.strip():
             logger.info("Detected NVIDIA GPU: %s", result.stdout.strip().split("\n")[0])
             return "nvidia"
-    except (FileNotFoundError, subprocess.TimeoutExpired):
+    except (FileNotFoundError, TimeoutExpired):
         pass
 
     # Check AMD (amd-smi)
     try:
-        result = subprocess.run(
+        result = run_silent(
             ["amd-smi", "list"],
             capture_output=True,
             text=True,
@@ -52,12 +55,12 @@ def detect_gpu_vendor() -> str | None:
         if result.returncode == 0 and result.stdout.strip():
             logger.info("Detected AMD GPU via amd-smi")
             return "amd"
-    except (FileNotFoundError, subprocess.TimeoutExpired):
+    except (FileNotFoundError, TimeoutExpired):
         pass
 
     # Check AMD (rocminfo)
     try:
-        result = subprocess.run(
+        result = run_silent(
             ["rocminfo"],
             capture_output=True,
             text=True,
@@ -66,7 +69,7 @@ def detect_gpu_vendor() -> str | None:
         if result.returncode == 0 and "gfx" in result.stdout:
             logger.info("Detected AMD GPU via rocminfo")
             return "amd"
-    except (FileNotFoundError, subprocess.TimeoutExpired):
+    except (FileNotFoundError, TimeoutExpired):
         pass
 
     # Check HIP_PATH (Windows AMD)
@@ -144,7 +147,7 @@ def install_addon(vendor: str, on_progress=None) -> bool:
 
         logger.debug("Running: %s", " ".join(cmd))
         # Stream pip output, only log meaningful lines (download progress, errors)
-        proc = subprocess.Popen(
+        proc = popen_silent(
             cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -178,7 +181,7 @@ def install_addon(vendor: str, on_progress=None) -> bool:
             on_progress(msg)
         return True
 
-    except subprocess.TimeoutExpired:
+    except TimeoutExpired:
         logger.error("GPU addon download timed out")
         if on_progress:
             on_progress("Download timed out. Running in CPU mode.")

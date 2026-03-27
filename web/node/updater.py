@@ -200,9 +200,14 @@ del "%~f0"
 
     import subprocess
 
+    si = subprocess.STARTUPINFO()
+    si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    si.wShowWindow = subprocess.SW_HIDE
     subprocess.Popen(
         ["cmd", "/c", script],
-        creationflags=0x00000008,  # DETACHED_PROCESS
+        creationflags=subprocess.DETACHED_PROCESS,
+        startupinfo=si,
+        close_fds=True,
     )
     logger.info("Update script launched — exiting for update")
     os._exit(0)
