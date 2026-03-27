@@ -35,7 +35,10 @@ a = Analysis(
     [str(ROOT / "web" / "node" / "corridorkey_node_main.py")],
     pathex=[str(ROOT)],
     binaries=[],
-    datas=[],
+    datas=[
+        # Version info embedded at build time (CI writes this file)
+        (str(ROOT / "web" / "node" / "_version.env"), "web/node/"),
+    ] if (ROOT / "web" / "node" / "_version.env").exists() else [],
     hiddenimports=_hidden + [
         # Node agent modules (relative imports not always detected)
         "web.node",

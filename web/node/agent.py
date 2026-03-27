@@ -27,8 +27,37 @@ from .weight_sync import sync_weights
 logger = logging.getLogger(__name__)
 
 
+def _load_embedded_version() -> dict[str, str]:
+    """Load version info from _version.env (embedded by CI in frozen builds)."""
+    import sys
+
+    # In frozen builds, _version.env is bundled by PyInstaller
+    if getattr(sys, "frozen", False):
+        version_path = os.path.join(sys._MEIPASS, "web", "node", "_version.env")
+    else:
+        version_path = os.path.join(os.path.dirname(__file__), "_version.env")
+
+    if os.path.isfile(version_path):
+        result = {}
+        with open(version_path) as f:
+            for line in f:
+                line = line.strip()
+                if "=" in line:
+                    k, v = line.split("=", 1)
+                    result[k.strip()] = v.strip()
+        return result
+    return {}
+
+
+_EMBEDDED_VERSION = _load_embedded_version()
+
+
 def _get_local_version() -> str:
-    """Detect version from git at runtime (dev mode)."""
+    """Detect version: embedded (frozen) > git (dev) > unknown."""
+    v = _EMBEDDED_VERSION.get("CK_BUILD_COMMIT")
+    if v:
+        return v[:12]
+
     try:
         import subprocess
 
@@ -44,7 +73,14 @@ def _get_local_version() -> str:
 
 
 def _get_local_build_number() -> int:
-    """Get git commit timestamp as build number (dev mode)."""
+    """Get build number: embedded (frozen) > git timestamp (dev) > 0."""
+    bn = _EMBEDDED_VERSION.get("CK_BUILD_NUMBER")
+    if bn:
+        try:
+            return int(bn)
+        except ValueError:
+            pass
+
     try:
         import subprocess
 
