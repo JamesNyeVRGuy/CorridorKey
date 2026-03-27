@@ -10,7 +10,7 @@
 
 #define MyAppName "CorridorKey Node"
 #define MyAppVersion "1.0.0"
-#define MyAppPublisher "Corridor Digital"
+#define MyAppPublisher "CorridorKey Cloud"
 #define MyAppURL "https://corridorkey.cloud"
 #define MyAppExeName "corridorkey-node.exe"
 
