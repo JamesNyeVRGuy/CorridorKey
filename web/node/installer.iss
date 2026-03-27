@@ -108,7 +108,7 @@ begin
   // Check display adapter registry for AMD/ATI
   for I := 0 to 19 do
   begin
-    SubKey := 'SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}\' + Format('%.4d', [I]);
+    SubKey := 'SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}\' + Copy('000' + IntToStr(I), Length('000' + IntToStr(I)) - 3, 4);
     if RegQueryStringValue(HKEY_LOCAL_MACHINE, SubKey, 'ProviderName', Provider) then
     begin
       if (Pos('AMD', Uppercase(Provider)) > 0) or (Pos('ATI', Uppercase(Provider)) > 0) then
@@ -147,14 +147,10 @@ end;
 procedure ExtractWhl(const WhlFile, DestDir: String);
 var
   ResultCode: Integer;
-  PSCommand: String;
 begin
   // Use PowerShell to extract (wheels are zip files)
-  PSCommand := Format(
-    'Expand-Archive -Path "%s" -DestinationPath "%s" -Force',
-    [WhlFile, DestDir]
-  );
-  Exec('powershell.exe', '-NoProfile -ExecutionPolicy Bypass -Command "' + PSCommand + '"',
+  Exec('powershell.exe',
+       '-NoProfile -ExecutionPolicy Bypass -Command "Expand-Archive -Path ''' + WhlFile + ''' -DestinationPath ''' + DestDir + ''' -Force"',
        '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   DeleteFile(WhlFile);
 end;
