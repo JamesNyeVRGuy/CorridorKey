@@ -2,7 +2,7 @@ name: Build & Release Node Binary
 
 on:
   push:
-    tags: ["node-v*"]
+    tags: ["node-v*", "cloud", "cloud-*"]
   workflow_dispatch:
 
 permissions:
