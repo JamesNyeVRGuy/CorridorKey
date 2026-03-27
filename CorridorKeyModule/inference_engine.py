@@ -64,12 +64,25 @@ class CorridorKeyEngine:
         self._is_rocm = hasattr(torch.version, "hip") and torch.version.hip
         self.model = self._load_model()
 
-        # torch.compile is tested on CUDA (Windows + Linux) and ROCm (Linux).
-        # ROCm on Windows hangs during Triton kernel compilation — skip it.
-        # CORRIDORKEY_SKIP_COMPILE=1 forces eager mode (useful for testing).
-        skip_compile = (self._is_rocm and sys.platform == "win32") or os.environ.get("CORRIDORKEY_SKIP_COMPILE") == "1"
-        if skip_compile:
-            logger.info("Skipping torch.compile (eager mode)")
+        # torch.compile needs: cl.exe (Windows), gcc (Linux), and Triton.
+        # Check prerequisites and skip with a helpful message if missing.
+        import shutil
+
+        skip_reason = None
+        if self._is_rocm and sys.platform == "win32":
+            skip_reason = "ROCm on Windows — Triton compilation hangs"
+        elif os.environ.get("CORRIDORKEY_SKIP_COMPILE") == "1":
+            skip_reason = "CORRIDORKEY_SKIP_COMPILE=1"
+        elif sys.platform == "win32" and not shutil.which("cl"):
+            skip_reason = (
+                "MSVC (cl.exe) not found. Install Visual Studio Build Tools "
+                "for ~30% faster inference: https://visualstudio.microsoft.com/visual-cpp-build-tools/"
+            )
+        elif sys.platform == "linux" and not shutil.which("gcc") and not shutil.which("cc"):
+            skip_reason = "no C compiler found — install gcc for faster inference"
+
+        if skip_reason:
+            logger.info("Skipping torch.compile (%s)", skip_reason)
         elif sys.platform == "linux" or sys.platform == "win32":
             self._compile()
 
