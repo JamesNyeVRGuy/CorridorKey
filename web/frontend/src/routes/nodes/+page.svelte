@@ -392,6 +392,7 @@
       - ck-weights:/app/CorridorKeyModule/checkpoints
       - ck-weights-gvm:/app/gvm_core/weights
       - ck-weights-vm:/app/VideoMaMaInferenceModule/checkpoints
+      - ck-compile-cache:/home/nodeuser/.cache/corridorkey
 
   watchtower:
     image: containrrr/watchtower
@@ -406,7 +407,8 @@
 volumes:
   ck-weights:
   ck-weights-gvm:
-  ck-weights-vm:</pre>
+  ck-weights-vm:
+  ck-compile-cache:</pre>
 						{:else}
 						<pre class="code mono">services:
   corridorkey-node:
@@ -430,6 +432,7 @@ volumes:
       - ck-weights:/app/CorridorKeyModule/checkpoints
       - ck-weights-gvm:/app/gvm_core/weights
       - ck-weights-vm:/app/VideoMaMaInferenceModule/checkpoints
+      - ck-compile-cache:/home/nodeuser/.cache/corridorkey
 
   watchtower:
     image: containrrr/watchtower
@@ -444,7 +447,8 @@ volumes:
 volumes:
   ck-weights:
   ck-weights-gvm:
-  ck-weights-vm:</pre>
+  ck-weights-vm:
+  ck-compile-cache:</pre>
 						{/if}
 						<p class="code-hint mono">docker compose up -d</p>
 					</div>
