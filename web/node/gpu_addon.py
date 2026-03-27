@@ -137,15 +137,22 @@ def install_addon(vendor: str, on_progress=None) -> bool:
         ]
 
         logger.info("Running: %s", " ".join(cmd))
-        result = subprocess.run(
+        # Stream pip output live so users see download progress
+        proc = subprocess.Popen(
             cmd,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
             text=True,
-            timeout=600,  # 10 min for large downloads
+            bufsize=1,
         )
+        for line in proc.stdout:
+            line = line.rstrip()
+            if line:
+                logger.info("[pip] %s", line)
+        proc.wait(timeout=600)
 
-        if result.returncode != 0:
-            logger.error("GPU addon install failed:\n%s", result.stderr)
+        if proc.returncode != 0:
+            logger.error("GPU addon install failed (exit code %d)", proc.returncode)
             if on_progress:
                 on_progress(f"{label} install failed. Running in CPU mode.")
             return False
