@@ -221,6 +221,14 @@ class NodeAgent:
                     f"server: {server_v}. Consider updating the node."
                 )
             return True
+        except httpx.HTTPStatusError as e:
+            detail = ""
+            try:
+                detail = e.response.json().get("detail", e.response.text)
+            except Exception:
+                detail = e.response.text
+            logger.error(f"Registration failed ({e.response.status_code}): {detail}")
+            return False
         except Exception as e:
             logger.error(f"Registration failed: {e}")
             return False

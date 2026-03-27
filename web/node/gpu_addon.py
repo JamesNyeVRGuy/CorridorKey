@@ -72,10 +72,35 @@ def detect_gpu_vendor() -> str | None:
     except (FileNotFoundError, TimeoutExpired):
         pass
 
-    # Check HIP_PATH (Windows AMD)
+    # Check AMD on Windows — HIP_PATH, default C:\hip, or driver registry
     if os.environ.get("HIP_PATH"):
-        logger.info("Detected AMD GPU via HIP_PATH")
+        logger.info("Detected AMD GPU via HIP_PATH=%s", os.environ["HIP_PATH"])
         return "amd"
+    if sys.platform == "win32":
+        # AMD's Windows ROCm installs to C:\hip by default
+        if os.path.isdir(r"C:\hip"):
+            logger.info("Detected AMD GPU via C:\\hip directory")
+            return "amd"
+        # Check Windows registry for AMD display adapters
+        try:
+            import winreg
+
+            key = winreg.OpenKey(
+                winreg.HKEY_LOCAL_MACHINE,
+                r"SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}",
+            )
+            for i in range(20):
+                try:
+                    subkey = winreg.OpenKey(key, f"{i:04d}")
+                    provider, _ = winreg.QueryValueEx(subkey, "ProviderName")
+                    if "AMD" in provider.upper() or "ATI" in provider.upper():
+                        desc, _ = winreg.QueryValueEx(subkey, "DriverDesc")
+                        logger.info("Detected AMD GPU via registry: %s", desc)
+                        return "amd"
+                except (OSError, FileNotFoundError):
+                    continue
+        except Exception:
+            pass
 
     return None
 
@@ -110,6 +135,11 @@ def install_addon(vendor: str, on_progress=None) -> bool:
         index_url = "https://download.pytorch.org/whl/cu128"
         packages = ["torch==2.8.0", "torchvision==0.23.0"]
         label = "CUDA"
+    elif vendor == "amd" and sys.platform == "win32":
+        # AMD Windows ROCm wheels are hosted at repo.radeon.com, not pytorch.org
+        label = "ROCm (Windows)"
+        logger.info("AMD Windows detected — downloading ROCm torch from repo.radeon.com")
+        return _install_amd_windows(on_progress)
     elif vendor == "amd":
         index_url = "https://download.pytorch.org/whl/rocm6.3"
         packages = ["torch==2.8.0", "torchvision==0.23.0"]
@@ -188,6 +218,84 @@ def install_addon(vendor: str, on_progress=None) -> bool:
         return False
     except Exception:
         logger.error("GPU addon install error", exc_info=True)
+        return False
+
+
+# AMD Windows ROCm wheel URLs (from repo.radeon.com)
+# The torch wheel depends on rocm==7.2.0.dev0 which pip resolves automatically.
+_AMD_WIN_WHEELS = [
+    "https://repo.radeon.com/rocm/windows/rocm-rel-7.2/torch-2.9.1+rocmsdk20260116-cp312-cp312-win_amd64.whl",
+    "https://repo.radeon.com/rocm/windows/rocm-rel-7.2/torchvision-0.24.1+rocmsdk20260116-cp312-cp312-win_amd64.whl",
+]
+
+
+def _install_amd_windows(on_progress=None) -> bool:
+    """Install AMD ROCm torch on Windows from repo.radeon.com.
+
+    Downloads .whl files directly via httpx and extracts them (wheels are
+    zip files). No pip or system Python required — works in frozen builds.
+    """
+    import zipfile
+
+    import httpx
+
+    os.makedirs(_ADDON_DIR, exist_ok=True)
+
+    msg = "Downloading AMD ROCm GPU acceleration (~800MB, one-time download)..."
+    logger.info(msg)
+    if on_progress:
+        on_progress(msg)
+
+    try:
+        for url in _AMD_WIN_WHEELS:
+            name = url.rsplit("/", 1)[-1]
+            dest = os.path.join(_ADDON_DIR, name)
+
+            logger.info("Downloading %s...", name)
+            if on_progress:
+                on_progress(f"Downloading {name.split('-')[0]}...")
+
+            with httpx.stream("GET", url, timeout=300, follow_redirects=True) as r:
+                if r.status_code != 200:
+                    logger.error("Failed to download %s: HTTP %d", url, r.status_code)
+                    return False
+                total = int(r.headers.get("content-length", 0))
+                downloaded = 0
+                with open(dest, "wb") as f:
+                    for chunk in r.iter_bytes(chunk_size=1024 * 1024):
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        if total > 0:
+                            pct = int(downloaded / total * 100)
+                            if pct % 10 == 0:
+                                logger.info(
+                                    "  %s: %dMB / %dMB (%d%%)",
+                                    name.split("-")[0],
+                                    downloaded // (1024 * 1024),
+                                    total // (1024 * 1024),
+                                    pct,
+                                )
+
+            # Extract wheel (it's a zip file) into the addon directory
+            logger.info("Extracting %s...", name)
+            with zipfile.ZipFile(dest, "r") as z:
+                z.extractall(_ADDON_DIR)
+            os.remove(dest)  # clean up the .whl file
+
+        # Write marker
+        with open(_MARKER_FILE, "w") as f:
+            f.write("amd\n")
+
+        msg = "AMD ROCm GPU acceleration installed successfully!"
+        logger.info(msg)
+        if on_progress:
+            on_progress(msg)
+        return True
+
+    except Exception:
+        logger.error("AMD ROCm install error", exc_info=True)
+        if on_progress:
+            on_progress("AMD ROCm install failed. Running in CPU mode.")
         return False
 
 
