@@ -44,7 +44,12 @@
 
 
 	const publicPaths = ['/login', '/signup', '/pending', '/status', '/terms', '/privacy'];
-	let isPublicPage = $derived(page.url.pathname === '/' || publicPaths.some((p) => page.url.pathname.startsWith(p)));
+	const _hasToken = () => !!localStorage.getItem('ck:auth_token');
+	// / is public only for logged-out users (landing page). Logged-in users get the sidebar.
+	let isPublicPage = $derived(
+		(page.url.pathname === '/' && !_hasToken()) ||
+		publicPaths.some((p) => page.url.pathname.startsWith(p))
+	);
 
 	async function refreshCredits() {
 		try {
@@ -77,8 +82,8 @@
 
 	onMount(async () => {
 		const currentPath = page.url.pathname;
-		const isPublic = currentPath === '/' || publicPaths.some((p) => currentPath.startsWith(p));
 		const hasToken = !!localStorage.getItem('ck:auth_token');
+		const isPublic = (currentPath === '/' && !hasToken) || publicPaths.some((p) => currentPath.startsWith(p));
 
 		// Quick path: if we have a token and we're on app pages, show the shell
 		// immediately without waiting for the auth status check. The API interceptor
@@ -98,9 +103,9 @@
 					window.location.href = '/login';
 					return;
 				}
-				if (hasToken && isPublic && currentPath !== '/pending' && !currentPath.startsWith('/status')) {
-					// Already logged in but on login/signup — redirect to app
-					goto('/clips');
+				if (hasToken && isPublic && currentPath !== '/pending' && !currentPath.startsWith('/status') && currentPath !== '/') {
+					// Already logged in but on login/signup — redirect to home
+					goto('/');
 					return;
 				}
 			}

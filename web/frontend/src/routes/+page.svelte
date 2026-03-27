@@ -1,16 +1,12 @@
 <script lang="ts">
-	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
 
-	let showLanding = $state(false);
+	let ready = $state(false);
+	let loggedIn = $state(false);
 
 	onMount(() => {
-		const hasToken = !!localStorage.getItem('ck:auth_token');
-		if (hasToken) {
-			goto('/clips');
-		} else {
-			showLanding = true;
-		}
+		loggedIn = !!localStorage.getItem('ck:auth_token');
+		ready = true;
 	});
 </script>
 
@@ -18,9 +14,10 @@
 	<title>CorridorKey Cloud — AI Green Screen Keying</title>
 </svelte:head>
 
-{#if showLanding}
+{#if ready}
 <div class="landing">
 	<!-- Nav -->
+	{#if !loggedIn}
 	<nav class="landing-nav">
 		<a href="/" class="nav-logo">
 			<img src="/Corridor_Digital_Logo.svg" alt="Corridor Digital" class="nav-logo-img" />
@@ -31,6 +28,7 @@
 			<a href="/signup" class="nav-btn">Get Started</a>
 		</div>
 	</nav>
+	{/if}
 
 	<!-- Hero -->
 	<section class="hero">
@@ -97,6 +95,7 @@
 		</div>
 	</section>
 
+	{#if !loggedIn}
 	<!-- CTA -->
 	<section class="section cta-section">
 		<h2 class="cta-title">Ready to key?</h2>
@@ -114,6 +113,7 @@
 		</div>
 		<span class="footer-copy mono">CorridorKey — Corridor Digital</span>
 	</footer>
+	{/if}
 </div>
 
 <script>
