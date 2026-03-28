@@ -364,11 +364,15 @@
 					<div class="code-block">
 						<span class="code-label mono">Standalone Binary (Windows & Linux — no Docker needed)</span>
 						<div class="download-links">
-							<a href="https://github.com/JamesNyeVRGuy/CorridorKey/releases/latest" target="_blank" rel="noopener" class="download-btn mono">
+							<a href="https://huggingface.co/JamesNyeVRGuy/corridorkey-node/resolve/main/latest/corridorkey-node-nvidia-setup.exe" target="_blank" rel="noopener" class="download-btn mono">
 								<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 1v9M4 7l4 4 4-4M2 13h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-								DOWNLOAD LATEST
+								NVIDIA
 							</a>
-							<p class="download-hint">Choose your GPU version (NVIDIA or AMD). Paste your token on first launch.</p>
+							<a href="https://huggingface.co/JamesNyeVRGuy/corridorkey-node/resolve/main/latest/corridorkey-node-amd-setup.exe" target="_blank" rel="noopener" class="download-btn mono download-secondary">
+								<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 1v9M4 7l4 4 4-4M2 13h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+								AMD
+							</a>
+							<p class="download-hint">Windows installer. Paste your token on first launch. Linux nodes should use Docker Compose below.</p>
 						</div>
 					</div>
 
@@ -1801,6 +1805,10 @@ volumes:
 		border-radius: var(--radius-sm); transition: all 0.15s;
 	}
 	.download-btn:hover { background: #fff; box-shadow: 0 0 12px rgba(255, 242, 3, 0.2); }
+	.download-secondary {
+		background: var(--surface-2); color: var(--text-secondary); margin-left: var(--sp-2);
+	}
+	.download-secondary:hover { background: var(--surface-3); color: var(--text-primary); box-shadow: none; }
 	.download-hint {
 		font-size: 10px; color: var(--text-tertiary); margin-top: var(--sp-2);
 	}
