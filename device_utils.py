@@ -176,11 +176,16 @@ def _enumerate_amd_windows() -> list[GPUInfo] | None:
                 if "AMD" not in provider.upper() and "ATI" not in provider.upper():
                     continue
                 desc, _ = winreg.QueryValueEx(subkey, "DriverDesc")
-                try:
-                    mem_bytes, _ = winreg.QueryValueEx(subkey, "qwMemorySize")
-                    total_gb = float(mem_bytes) / (1024**3)
-                except OSError:
-                    total_gb = 0
+                total_gb = 0
+                # Try 64-bit value first, then 32-bit fallback
+                for reg_name in ("HardwareInformation.qwMemorySize", "HardwareInformation.MemorySize"):
+                    try:
+                        mem_bytes, _ = winreg.QueryValueEx(subkey, reg_name)
+                        total_gb = float(mem_bytes) / (1024**3)
+                        if total_gb > 0:
+                            break
+                    except OSError:
+                        continue
                 gpus.append(GPUInfo(index=len(gpus), name=desc, vram_total_gb=total_gb, vram_free_gb=total_gb))
             except OSError:
                 continue
