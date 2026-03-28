@@ -58,13 +58,12 @@ jobs:
           pip install --no-cache-dir https://repo.radeon.com/rocm/windows/rocm-rel-7.2/rocm-7.2.0.dev0.tar.gz https://repo.radeon.com/rocm/windows/rocm-rel-7.2/rocm_sdk_core-7.2.0.dev0-py3-none-win_amd64.whl https://repo.radeon.com/rocm/windows/rocm-rel-7.2/rocm_sdk_libraries_custom-7.2.0.dev0-py3-none-win_amd64.whl
           pip install --no-cache-dir --force-reinstall --no-deps https://repo.radeon.com/rocm/windows/rocm-rel-7.2/torch-2.9.1+rocmsdk20260116-cp312-cp312-win_amd64.whl https://repo.radeon.com/rocm/windows/rocm-rel-7.2/torchvision-0.24.1+rocmsdk20260116-cp312-cp312-win_amd64.whl
 
-      - name: Replace caffe2_nvrtc with stub (AMD torch ships NVIDIA DLL that crashes on AMD-only machines)
+      - name: Remove NVIDIA DLLs from AMD torch (AMD's wheel ships caffe2_nvrtc which needs nvcuda.dll)
         if: contains(matrix.artifact, 'amd')
         shell: pwsh
         run: |
           $torchLib = python -c "import os, torch; print(os.path.join(os.path.dirname(torch.__file__), 'lib'))"
           Remove-Item "$torchLib\caffe2_nvrtc*" -Force -ErrorAction SilentlyContinue
-          Copy-Item web/node/caffe2_nvrtc_stub.dll "$torchLib\caffe2_nvrtc.dll"
           python -c "import torch; print('torch:', torch.__version__, 'HIP:', torch.version.hip); import os; print('DLLs:', [f for f in os.listdir(os.path.join(os.path.dirname(torch.__file__),'lib')) if f.endswith('.dll')])"
 
       - name: Embed version info

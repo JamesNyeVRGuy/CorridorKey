@@ -184,9 +184,10 @@ a.datas = [(name, path, typ) for name, path, typ in a.datas if not any(p in name
 # Strip binaries that shouldn't be in the bundle:
 # - onnxruntime: not needed for inference
 # - clang_rt.asan: debug-only ASAN runtime, crashes when loaded alongside system ucrtbase
+# - caffe2_nvrtc: NVIDIA DLL shipped in AMD torch wheel, crashes on AMD-only machines
 a.binaries = [
     (name, path, typ) for name, path, typ in a.binaries
-    if "onnxruntime" not in name and "clang_rt.asan" not in name
+    if "onnxruntime" not in name and "clang_rt.asan" not in name and "caffe2_nvrtc" not in name
 ]
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
