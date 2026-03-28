@@ -3,6 +3,7 @@
 import json
 import logging
 import os
+import sys
 from dataclasses import dataclass
 from subprocess import TimeoutExpired
 
@@ -154,10 +155,44 @@ def _enumerate_nvidia() -> list[GPUInfo] | None:
         return None
 
 
+def _enumerate_amd_windows() -> list[GPUInfo] | None:
+    """Enumerate AMD GPUs on Windows via registry. Returns None if unavailable.
+
+    Win32_VideoController.AdapterRAM is uint32 and overflows for >4GB GPUs.
+    The registry stores the real VRAM size as qwMemorySize (64-bit).
+    """
+    if sys.platform != "win32":
+        return None
+    try:
+        import winreg
+
+        gpus: list[GPUInfo] = []
+        base_key = r"SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}"
+        key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, base_key)
+        for i in range(20):
+            try:
+                subkey = winreg.OpenKey(key, f"{i:04d}")
+                provider, _ = winreg.QueryValueEx(subkey, "ProviderName")
+                if "AMD" not in provider.upper() and "ATI" not in provider.upper():
+                    continue
+                desc, _ = winreg.QueryValueEx(subkey, "DriverDesc")
+                try:
+                    mem_bytes, _ = winreg.QueryValueEx(subkey, "qwMemorySize")
+                    total_gb = float(mem_bytes) / (1024**3)
+                except OSError:
+                    total_gb = 0
+                gpus.append(GPUInfo(index=len(gpus), name=desc, vram_total_gb=total_gb, vram_free_gb=total_gb))
+            except OSError:
+                continue
+        return gpus if gpus else None
+    except Exception:
+        return None
+
+
 def _enumerate_amd() -> list[GPUInfo] | None:
     """Enumerate AMD GPUs via amd-smi (ROCm). Returns None if unavailable.
 
-    Tries amd-smi first (modern), then rocm-smi (legacy).
+    Tries amd-smi first (modern), then rocm-smi (legacy), then Windows WMI.
     """
     # Try amd-smi (ROCm 6.0+)
     try:
@@ -231,7 +266,8 @@ def _enumerate_amd() -> list[GPUInfo] | None:
     except (FileNotFoundError, TimeoutExpired):
         pass
 
-    return None
+    # Windows: no amd-smi/rocm-smi, fall back to WMI
+    return _enumerate_amd_windows()
 
 
 def enumerate_gpus() -> list[GPUInfo]:
@@ -252,20 +288,25 @@ def enumerate_gpus() -> list[GPUInfo]:
         return gpus
 
     # Fallback to torch (works for both NVIDIA and ROCm via HIP)
-    if torch.cuda.is_available():
-        fallback: list[GPUInfo] = []
-        for i in range(torch.cuda.device_count()):
-            props = torch.cuda.get_device_properties(i)
-            total = props.total_memory / (1024**3)
-            fallback.append(
-                GPUInfo(
-                    index=i,
-                    name=props.name,
-                    vram_total_gb=total,
-                    vram_free_gb=total,  # can't query free without setting device
+    try:
+        if torch.cuda.is_available():
+            fallback: list[GPUInfo] = []
+            for i in range(torch.cuda.device_count()):
+                props = torch.cuda.get_device_properties(i)
+                total = props.total_memory / (1024**3)
+                fallback.append(
+                    GPUInfo(
+                        index=i,
+                        name=props.name,
+                        vram_total_gb=total,
+                        vram_free_gb=total,  # can't query free without setting device
+                    )
                 )
-            )
-        return fallback
+            return fallback
+    except RuntimeError:
+        # AMD torch ships caffe2_nvrtc.dll (NVIDIA) which crashes on AMD-only machines.
+        # _lazy_init() fails with LoadLibrary error — fall through to empty list.
+        logger.debug("torch.cuda init failed (caffe2_nvrtc?), falling through", exc_info=True)
 
     return []
 
