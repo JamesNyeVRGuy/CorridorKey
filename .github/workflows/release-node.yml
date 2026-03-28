@@ -23,7 +23,7 @@ jobs:
           - os: windows-latest
             artifact: corridorkey-node-amd-win-x64
             ext: .zip
-            torch_cmd: "pip install --no-cache-dir https://repo.radeon.com/rocm/windows/rocm-rel-7.2/rocm-7.2.0.dev0.tar.gz https://repo.radeon.com/rocm/windows/rocm-rel-7.2/torch-2.9.1+rocmsdk20260116-cp312-cp312-win_amd64.whl https://repo.radeon.com/rocm/windows/rocm-rel-7.2/torchvision-0.24.1+rocmsdk20260116-cp312-cp312-win_amd64.whl"
+            torch_cmd: "echo skip"
             python_version: "3.12"
           # Linux users should use Docker (corridorkey-node:nvidia or :amd)
     runs-on: ${{ matrix.os }}
@@ -51,6 +51,12 @@ jobs:
           ${{ matrix.torch_cmd }}
           pip install -e .
           pip install sniffio httpcore h11 anyio certifi
+
+      - name: Install AMD ROCm torch (overwrites CPU/CUDA torch from pip install -e .)
+        if: contains(matrix.artifact, 'amd')
+        run: |
+          pip install --no-cache-dir --force-reinstall --no-deps https://repo.radeon.com/rocm/windows/rocm-rel-7.2/torch-2.9.1+rocmsdk20260116-cp312-cp312-win_amd64.whl https://repo.radeon.com/rocm/windows/rocm-rel-7.2/torchvision-0.24.1+rocmsdk20260116-cp312-cp312-win_amd64.whl
+          python -c "import torch; print('torch version:', torch.__version__); print('HIP:', torch.version.hip); import os; dlls=[f for f in os.listdir(os.path.join(os.path.dirname(torch.__file__), 'lib')) if f.endswith('.dll')]; print('DLLs:', dlls)"
 
       - name: Embed version info
         run: |
