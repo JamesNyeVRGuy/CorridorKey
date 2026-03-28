@@ -31,10 +31,19 @@ _hidden = (
     + collect_submodules("certifi")
 )
 
+# Collect torch DLLs that PyInstaller's hook misses (HIP/ROCm, triton)
+import glob as _glob
+
+_torch_lib = os.path.join(os.path.dirname(__import__('torch').__file__), 'lib')
+_extra_binaries = []
+for pattern in ['*hip*', '*rocm*', '*miopen*', '*hiprtc*', '*amdhip*', '*rocsolver*', '*rocblas*', '*hipblas*', '*hsa*']:
+    for f in _glob.glob(os.path.join(_torch_lib, pattern)):
+        _extra_binaries.append((f, 'torch/lib'))
+
 a = Analysis(
     [str(ROOT / "web" / "node" / "corridorkey_node_main.py")],
     pathex=[str(ROOT)],
-    binaries=[],
+    binaries=_extra_binaries,
     datas=[
         # App icon for tray
         (str(ROOT / "web" / "node" / "icon.png"), "web/node/"),
