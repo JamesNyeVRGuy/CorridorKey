@@ -4,6 +4,7 @@
 	import { onMount } from 'svelte';
 	import { api } from '$lib/api';
 	import type { Clip, InferenceParams, OutputConfig } from '$lib/api';
+	import { getActiveOrgId } from '$lib/auth';
 	import { defaultParams, defaultOutputConfig, autoShard } from '$lib/stores/settings';
 	import { refreshJobs, runningJobs, queuedJobs } from '$lib/stores/jobs';
 	import { refreshClips, clips } from '$lib/stores/clips';
@@ -15,6 +16,15 @@
 	let loading = $state(true);
 	let error = $state<string | null>(null);
 	let submitting = $state(false);
+
+	function downloadUrl(clipName: string, pass: string): string {
+		const params = new URLSearchParams();
+		const token = localStorage.getItem('ck:auth_token');
+		if (token) params.set('token', token);
+		const orgId = getActiveOrgId();
+		if (orgId) params.set('org', orgId);
+		return `/api/preview/${encodeURIComponent(clipName)}/${pass}/download?${params.toString()}`;
+	}
 
 	let params = $state<InferenceParams>({ ...$defaultParams });
 	let outputConfig = $state<OutputConfig>({ ...$defaultOutputConfig });
@@ -294,7 +304,7 @@
 					{#if clip?.has_outputs}
 						<!-- Post-inference: download + reprocess side by side -->
 						<div class="hero-row">
-							<a href={`/api/preview/${encodeURIComponent(clip.name)}/processed/download?token=${encodeURIComponent(localStorage.getItem('ck:auth_token') || '')}`} class="btn btn-hero download-hero">
+							<a href={downloadUrl(clip.name, 'processed')} class="btn btn-hero download-hero">
 								<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 2v8M4 7l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M2 12h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
 								Download EXR
 							</a>
@@ -305,9 +315,9 @@
 							{/if}
 						</div>
 						<div class="download-passes mono">
-							<a href={`/api/preview/${encodeURIComponent(clip.name)}/fg/download?token=${encodeURIComponent(localStorage.getItem('ck:auth_token') || '')}`} class="pass-dl">FG</a>
-							<a href={`/api/preview/${encodeURIComponent(clip.name)}/matte/download?token=${encodeURIComponent(localStorage.getItem('ck:auth_token') || '')}`} class="pass-dl">Matte</a>
-							<a href={`/api/preview/${encodeURIComponent(clip.name)}/comp/download?token=${encodeURIComponent(localStorage.getItem('ck:auth_token') || '')}`} class="pass-dl">Comp</a>
+							<a href={downloadUrl(clip.name, 'fg')} class="pass-dl">FG</a>
+							<a href={downloadUrl(clip.name, 'matte')} class="pass-dl">Matte</a>
+							<a href={downloadUrl(clip.name, 'comp')} class="pass-dl">Comp</a>
 						</div>
 					{:else if canRunPipeline}
 						<button class="btn btn-hero" onclick={runPipeline} disabled={submitting}>

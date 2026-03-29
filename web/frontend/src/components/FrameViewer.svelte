@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { api } from '$lib/api';
+	import { getActiveOrgId } from '$lib/auth';
 	import { onMount } from 'svelte';
 
 	let {
@@ -216,9 +217,14 @@
 	);
 
 	function authUrl(path: string): string {
+		const params = new URLSearchParams();
 		const token = localStorage.getItem('ck:auth_token');
+		if (token) params.set('token', token);
+		const orgId = getActiveOrgId();
+		if (orgId) params.set('org', orgId);
+		const qs = params.toString();
 		const sep = path.includes('?') ? '&' : '?';
-		return token ? `${path}${sep}token=${encodeURIComponent(token)}` : path;
+		return qs ? `${path}${sep}${qs}` : path;
 	}
 
 	let videoUrl = $derived(

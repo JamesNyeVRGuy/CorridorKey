@@ -337,8 +337,13 @@ export const api = {
 	preview: {
 		url: (clipName: string, passName: string, frame: number) => {
 			const base = `${BASE}/api/preview/${encodeURIComponent(clipName)}/${passName}/${frame}`;
+			const params = new URLSearchParams();
 			const token = localStorage.getItem('ck:auth_token');
-			return token ? `${base}?token=${encodeURIComponent(token)}` : base;
+			if (token) params.set('token', token);
+			const orgId = getActiveOrgId();
+			if (orgId) params.set('org', orgId);
+			const qs = params.toString();
+			return qs ? `${base}?${qs}` : base;
 		}
 	},
 	nodes: {
