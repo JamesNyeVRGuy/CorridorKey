@@ -31,6 +31,7 @@ def _make_request(user: UserContext | None = None) -> MagicMock:
     request = MagicMock()
     request.state.user = user
     request.headers = {}  # Real dict so .get() works correctly
+    request.query_params = {}  # Real dict for ?org= fallback
     return request
 
 
