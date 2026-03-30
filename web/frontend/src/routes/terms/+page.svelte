@@ -40,7 +40,7 @@
 	<p>We may update these terms. Continued use after changes constitutes acceptance. Material changes will be communicated via the platform.</p>
 
 	<h2>9. Contact</h2>
-	<p>Questions about these terms? Reach out on <a href="https://discord.gg/corridordigital" target="_blank" rel="noopener">Discord</a>.</p>
+	<p>Questions about these terms? Reach out on <a href="https://discord.gg/44tHTSCGVQ" target="_blank" rel="noopener">Discord</a>.</p>
 </div>
 
 <style>

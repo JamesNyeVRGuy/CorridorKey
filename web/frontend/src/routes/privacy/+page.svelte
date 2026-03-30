@@ -52,7 +52,7 @@
 	<p>We may update this policy. Material changes will be communicated via the platform. Continued use after changes constitutes acceptance.</p>
 
 	<h2>9. Contact</h2>
-	<p>Privacy questions? Reach out on <a href="https://discord.gg/corridordigital" target="_blank" rel="noopener">Discord</a>.</p>
+	<p>Privacy questions? Reach out on <a href="https://discord.gg/44tHTSCGVQ" target="_blank" rel="noopener">Discord</a>.</p>
 </div>
 
 <style>
