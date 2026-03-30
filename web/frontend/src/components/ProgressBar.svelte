@@ -13,10 +13,27 @@
 
 	let pct = $derived(total > 0 ? Math.min(100, (current / total) * 100) : 0);
 
+	// Track when first real progress arrives (excludes download/load time)
+	let firstProgressAt = $state<number | null>(null);
+	let firstProgressFrame = $state(0);
+	$effect(() => {
+		if (current > 0 && !firstProgressAt) {
+			firstProgressAt = Date.now();
+			firstProgressFrame = current;
+		}
+		// Reset if job restarts
+		if (current === 0) {
+			firstProgressAt = null;
+			firstProgressFrame = 0;
+		}
+	});
+
 	let eta = $derived.by(() => {
-		if (!startedAt || current <= 0 || total <= 0) return '';
-		const elapsed = (Date.now() - startedAt) / 1000;
-		const perFrame = elapsed / current;
+		if (!firstProgressAt || current <= firstProgressFrame || total <= 0) return '';
+		const elapsed = (Date.now() - firstProgressAt) / 1000;
+		const framesProcessed = current - firstProgressFrame;
+		if (framesProcessed <= 0 || elapsed < 1) return '';
+		const perFrame = elapsed / framesProcessed;
 		const remaining = perFrame * (total - current);
 		if (remaining < 1) return '';
 		if (remaining < 60) return `~${Math.ceil(remaining)}s`;
@@ -27,10 +44,11 @@
 	});
 
 	let fps = $derived.by(() => {
-		if (!startedAt || current <= 0) return '';
-		const elapsed = (Date.now() - startedAt) / 1000;
-		if (elapsed < 1) return '';
-		return (current / elapsed).toFixed(1);
+		if (!firstProgressAt || current <= firstProgressFrame) return '';
+		const elapsed = (Date.now() - firstProgressAt) / 1000;
+		const framesProcessed = current - firstProgressFrame;
+		if (elapsed < 1 || framesProcessed <= 0) return '';
+		return (framesProcessed / elapsed).toFixed(1);
 	});
 </script>
 
