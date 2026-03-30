@@ -30,7 +30,8 @@ _CACHE_MAX_SIZE = 500  # max org entries before eviction
 _CACHE_EVICT_AGE = 300  # evict entries older than 5 minutes
 # Max concurrent uploads per user
 _MAX_CONCURRENT_UPLOADS = int(os.environ.get("CK_MAX_CONCURRENT_UPLOADS", "3").strip())
-_active_uploads: dict[str, int] = {}  # {user_id: count}
+_UPLOAD_SLOT_TIMEOUT = 300  # auto-release slots after 5 minutes
+_active_uploads: dict[str, list[float]] = {}  # {user_id: [start_timestamp, ...]}
 _upload_lock = threading.Lock()
 
 
@@ -143,15 +144,22 @@ def check_storage_quota(request: Request, additional_bytes: int = 0) -> None:
 
     # Concurrent upload limit (after org check to avoid slot leak for org-less users)
     if _MAX_CONCURRENT_UPLOADS > 0:
+        import time
+
         with _upload_lock:
-            current = _active_uploads.get(user.user_id, 0)
-            if current >= _MAX_CONCURRENT_UPLOADS:
+            slots = _active_uploads.get(user.user_id, [])
+            # Auto-expire stale slots (protects against leaked slots from failed uploads)
+            now = time.time()
+            slots = [t for t in slots if now - t < _UPLOAD_SLOT_TIMEOUT]
+            _active_uploads[user.user_id] = slots
+
+            if len(slots) >= _MAX_CONCURRENT_UPLOADS:
                 raise HTTPException(
                     status_code=429,
                     detail=f"Too many concurrent uploads (max {_MAX_CONCURRENT_UPLOADS}). "
                     "Wait for current uploads to finish.",
                 )
-            _active_uploads[user.user_id] = current + 1
+            slots.append(now)
 
     org = user_orgs[0]
     used = get_org_disk_usage(org.org_id)
@@ -169,12 +177,12 @@ def check_storage_quota(request: Request, additional_bytes: int = 0) -> None:
 
 
 def _release_upload_slot(user_id: str) -> None:
-    """Release a concurrent upload slot."""
+    """Release a concurrent upload slot (removes oldest)."""
     with _upload_lock:
-        current = _active_uploads.get(user_id, 0)
-        if current > 0:
-            _active_uploads[user_id] = current - 1
-        else:
+        slots = _active_uploads.get(user_id, [])
+        if slots:
+            slots.pop(0)  # remove oldest slot
+        if not slots:
             _active_uploads.pop(user_id, None)
 
 

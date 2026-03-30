@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -21,6 +23,12 @@ from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoin
 from starlette.responses import JSONResponse, Response
 
 logger = logging.getLogger(__name__)
+
+# JWT decode cache — avoids redundant HMAC verification for the same token
+_jwt_cache: dict[str, tuple[float, dict[str, Any]]] = {}  # {token: (timestamp, claims)}
+_jwt_cache_lock = threading.Lock()
+_JWT_CACHE_TTL = 30  # seconds
+_JWT_CACHE_MAX = 1000  # max cached tokens
 
 # Configuration from environment
 AUTH_ENABLED = os.environ.get("CK_AUTH_ENABLED", "false").strip().lower() in ("true", "1", "yes")
@@ -141,15 +149,38 @@ def require_tier(request: Request, min_tier: str) -> UserContext:
 
 
 def _decode_jwt(token: str) -> dict[str, Any]:
-    """Decode and validate a Supabase JWT."""
+    """Decode and validate a Supabase JWT. Cached for 30s per token."""
+    now = time.time()
+
+    # Check cache first (avoids HMAC verification on every request)
+    with _jwt_cache_lock:
+        cached = _jwt_cache.get(token)
+        if cached and now - cached[0] < _JWT_CACHE_TTL:
+            return cached[1]
+
     try:
         payload = jwt.decode(token, JWT_SECRET, algorithms=JWT_ALGORITHMS, audience="authenticated")
-        return payload
     except jwt.ExpiredSignatureError as e:
         raise HTTPException(status_code=401, detail="Token expired") from e
     except jwt.InvalidTokenError as e:
         logger.debug(f"JWT validation failed: {e}")
         raise HTTPException(status_code=401, detail="Invalid token") from e
+
+    with _jwt_cache_lock:
+        # Evict stale entries if cache is full
+        if len(_jwt_cache) >= _JWT_CACHE_MAX:
+            cutoff = now - _JWT_CACHE_TTL
+            stale = [k for k, (ts, _) in _jwt_cache.items() if ts < cutoff]
+            for k in stale:
+                del _jwt_cache[k]
+            # If still full after eviction, clear oldest half
+            if len(_jwt_cache) >= _JWT_CACHE_MAX:
+                sorted_keys = sorted(_jwt_cache, key=lambda k: _jwt_cache[k][0])
+                for k in sorted_keys[: len(sorted_keys) // 2]:
+                    del _jwt_cache[k]
+        _jwt_cache[token] = (now, payload)
+
+    return payload
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
