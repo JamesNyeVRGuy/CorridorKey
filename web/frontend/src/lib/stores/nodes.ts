@@ -51,12 +51,16 @@ export const nodes = writable<NodeInfo[]>([]);
 
 let refreshPending = false;
 
+function sortNodes(list: NodeInfo[]): NodeInfo[] {
+	return list.sort((a, b) => a.name.localeCompare(b.name) || a.node_id.localeCompare(b.node_id));
+}
+
 export async function refreshNodes() {
 	if (refreshPending) return;
 	refreshPending = true;
 	try {
 		const list = await api.nodes.list();
-		nodes.set(list);
+		nodes.set(sortNodes(list));
 	} catch {
 		// silently fail
 	} finally {
@@ -72,7 +76,7 @@ export function updateNodeFromWS(data: NodeInfo) {
 		} else {
 			list = [...list, data];
 		}
-		return list;
+		return sortNodes(list);
 	});
 }
 
