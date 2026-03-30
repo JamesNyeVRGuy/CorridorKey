@@ -119,7 +119,7 @@ def _node_clips_dir(node_id: str, org_id: str | None = None, job_id: str | None 
 
 
 def _save_node_config(node_id: str, node: NodeInfo) -> None:
-    """Persist UI-configurable node settings."""
+    """Persist UI-configurable node settings and write back to state backend."""
     storage = get_storage()
     configs = storage.get_setting("node_configs", {})
     configs[node_id] = {
@@ -129,6 +129,7 @@ def _save_node_config(node_id: str, node: NodeInfo) -> None:
         "accepted_types": node.accepted_types,
     }
     storage.set_setting("node_configs", configs)
+    get_node_state().update_node(node_id, node)
 
 
 def _restore_node_config(node: NodeInfo) -> None:
@@ -354,6 +355,9 @@ def node_heartbeat(node_id: str, req: NodeHeartbeatRequest, request: Request):
         if req.cpu_stats:
             node.cpu_stats = req.cpu_stats
             node.record_health()
+        # Write mutations back to state backend (required for Redis)
+        if req.logs or req.cpu_stats:
+            get_node_state().update_node(node_id, node)
         # Note: GPU credit contribution is tracked on job COMPLETION,
         # not heartbeat. See report_job_result below. This prevents
         # nodes from faking "busy" status to earn credits.

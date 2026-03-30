@@ -78,7 +78,7 @@ def _require_node_access(request: Request, node_id: str, manage: bool = False) -
 
 
 def _save_node_config(node_id: str, node: NodeInfo) -> None:
-    """Persist UI-configurable node settings."""
+    """Persist UI-configurable node settings and write back to state backend."""
     storage = get_storage()
     configs = storage.get_setting("node_configs", {})
     configs[node_id] = {
@@ -88,6 +88,8 @@ def _save_node_config(node_id: str, node: NodeInfo) -> None:
         "accepted_types": node.accepted_types,
     }
     storage.set_setting("node_configs", configs)
+    # Write mutated node back to state backend (required for Redis — in-memory is a no-op)
+    get_node_state().update_node(node_id, node)
 
 
 def _broadcast_node_update(node: NodeInfo) -> None:

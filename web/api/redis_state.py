@@ -257,6 +257,12 @@ class RedisNodeState:
         pipe.execute()
         logger.info(f"Node unregistered: {node_id}")
 
+    def update_node(self, node_id: str, info: NodeInfo) -> None:
+        """Write back a mutated NodeInfo to Redis."""
+        r = get_redis()
+        if r.sismember("ck:nodes", node_id):
+            r.set(_node_key(node_id), _save_node(info))
+
     def set_busy(self, node_id: str, job_id: str) -> None:
         r = get_redis()
         data = r.get(_node_key(node_id))
