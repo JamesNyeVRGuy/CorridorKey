@@ -45,6 +45,30 @@
 
 	const publicPaths = ['/login', '/signup', '/pending', '/status', '/terms', '/privacy'];
 	const _hasToken = () => !!localStorage.getItem('ck:auth_token');
+	let _storesInitialized = $state(false);
+
+	function _initAppStores() {
+		if (_storesInitialized) return;
+		_storesInitialized = true;
+		connect();
+		refreshDevice();
+		refreshVRAM();
+		refreshClips();
+		refreshJobs();
+		refreshNodes();
+		if (authEnabled) loadUserOrgs();
+		if (authEnabled) refreshCredits();
+	}
+
+	// Re-check when navigating from public page (login/signup) to app page
+	$effect(() => {
+		const path = page.url.pathname;
+		const isPublic = (path === '/' && !_hasToken()) || publicPaths.some((p) => path.startsWith(p));
+		if (!isPublic && _hasToken() && authChecked && !_storesInitialized) {
+			_initAppStores();
+		}
+	});
+
 	// / is public only for logged-out users (landing page). Logged-in users get the sidebar.
 	let isPublicPage = $derived(
 		(page.url.pathname === '/' && !_hasToken()) ||
@@ -118,16 +142,7 @@
 		// Only connect and refresh stores on app pages, not login/signup/pending
 		if (isPublic) return;
 
-		connect();
-		refreshDevice();
-		refreshVRAM();
-		refreshClips();
-		refreshJobs();
-		refreshNodes();
-		if (authEnabled) loadUserOrgs();
-
-		// Load credit balance for sidebar (CRKY-6)
-		if (authEnabled) refreshCredits();
+		_initAppStores();
 
 		const unsubWs = onMessage((msg) => {
 			if (msg.type === 'job:progress') {
