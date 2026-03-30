@@ -109,6 +109,7 @@ class NodeInfo:
     agent_version: str = ""  # reported by node on registration
     build_number: int = 0  # git commit timestamp — higher = newer
     version_ok: bool = True  # set at registration — False if outdated
+    model_compiled: bool = False  # torch.compile succeeded — node runs ~30% faster
     cpu_stats: dict = field(default_factory=dict)  # {cpu_percent, cpu_count, ram_*}
     health_history: list[dict] = field(default_factory=list, repr=False)  # last N snapshots
     recent_logs: list[str] = field(default_factory=list, repr=False)
@@ -180,6 +181,7 @@ class NodeInfo:
             "agent_version": self.agent_version,
             "build_number": self.build_number,
             "version_ok": self.version_ok,
+            "model_compiled": self.model_compiled,
         }
 
     def to_storage_dict(self) -> dict:
@@ -236,6 +238,7 @@ class NodeInfo:
             agent_version=d.get("agent_version", ""),
             build_number=d.get("build_number", 0),
             version_ok=d.get("version_ok", True),
+            model_compiled=d.get("model_compiled", False),
             cpu_stats=d.get("cpu_stats", {}),
             health_history=d.get("health_history", []),
             recent_logs=d.get("recent_logs", []),
@@ -265,6 +268,7 @@ class NodeInfo:
             "agent_version": self.agent_version,
             "build_number": self.build_number,
             "version_ok": self.version_ok,
+            "model_compiled": self.model_compiled,
         }
 
 

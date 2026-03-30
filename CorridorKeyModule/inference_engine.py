@@ -70,6 +70,7 @@ class CorridorKeyEngine:
         self.img_size = img_size
         self.checkpoint_path = checkpoint_path
         self.use_refiner = use_refiner
+        self.compiled = False
 
         self.mean = torch.tensor([0.485, 0.456, 0.406], dtype=model_precision, device=self.device)
         self.std = torch.tensor([0.229, 0.224, 0.225], dtype=model_precision, device=self.device)
@@ -209,6 +210,7 @@ class CorridorKeyEngine:
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
             self.model = compiled_model
+            self.compiled = True
             logger.info("Model compiled successfully (mode=%s)", compile_mode)
 
         except Exception as e:

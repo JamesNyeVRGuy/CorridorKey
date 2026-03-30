@@ -137,9 +137,10 @@ class NodeAgent:
             svc = CorridorKeyService()
             svc.detect_device()
             # Access the engine to trigger model loading
-            svc._get_engine()
+            engine = svc._get_engine()
+            self._model_compiled = getattr(engine, "compiled", False)
             elapsed = _time.monotonic() - t0
-            logger.info(f"Model pre-warmed in {elapsed:.1f}s")
+            logger.info(f"Model pre-warmed in {elapsed:.1f}s (compiled={self._model_compiled})")
         except Exception as e:
             logger.warning(f"Pre-warm failed (will load on first job): {e}")
 
@@ -188,6 +189,7 @@ class NodeAgent:
             "vram_total_gb": first_gpu.get("vram_total_gb", 0),
             "vram_free_gb": first_gpu.get("vram_free_gb", 0),
             "capabilities": ["cuda"] if gpu_slots else ["cpu"],
+            "model_compiled": getattr(self, "_model_compiled", False),
             "shared_storage": self.shared_storage,
             "accepted_types": [t.strip() for t in config.ACCEPTED_TYPES.split(",") if t.strip()],
             "security": {

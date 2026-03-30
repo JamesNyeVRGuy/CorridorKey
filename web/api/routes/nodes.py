@@ -179,6 +179,7 @@ class NodeRegisterRequest(BaseModel):
     vram_total_gb: float = 0.0
     vram_free_gb: float = 0.0
     capabilities: list[str] = []
+    model_compiled: bool = False
     shared_storage: str | None = None
     org_id: str | None = None
     accepted_types: list[str] = []
@@ -279,6 +280,7 @@ def register_node(req: NodeRegisterRequest, request: Request):
         vram_total_gb=req.vram_total_gb,
         vram_free_gb=req.vram_free_gb,
         capabilities=req.capabilities,
+        model_compiled=req.model_compiled,
         shared_storage=req.shared_storage,
         org_id=org_id,
         accepted_types=req.accepted_types,
@@ -505,7 +507,11 @@ async def get_next_job(node_id: str, request: Request):
     rep = get_reputation(node_id)
     if rep.completed_jobs + rep.failed_jobs >= 3:
         # Only apply delay after enough history to judge
-        delay = max(0.0, (100 - rep.score) / 100.0)  # 0-1 second
+        score = rep.score
+        # Compiled nodes get a dispatch boost (claim jobs faster)
+        if node.model_compiled:
+            score = min(100, score + 10)
+        delay = max(0.0, (100 - score) / 100.0)  # 0-1 second
         if delay > 0.05:
             await _asyncio.sleep(delay)
 
