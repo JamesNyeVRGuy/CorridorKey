@@ -226,9 +226,9 @@ def register_node(req: NodeRegisterRequest, request: Request):
     if req.security.running_as_root:
         security_warnings.append("running as root (uid 0)")
 
-    # Self-reported: not hardened?
-    if not req.security.hardened:
-        security_warnings.append("not running in hardened mode")
+    # Note: read_only_fs and hardened mode are informational only.
+    # The default Docker image runs as non-root (nodeuser, uid 1000)
+    # which is sufficient for the default security posture.
 
     # Reject if CK_REQUIRE_HARDENED and node doesn't meet requirements
     if require_hardened:

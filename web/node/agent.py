@@ -388,12 +388,14 @@ class NodeAgent:
         if not use_shared and clips_dir:
             out_cfg = job_data.get("params", {}).get("output_config", {})
             enabled_outputs = [
-                k for k, enabled in [
+                k
+                for k, enabled in [
                     ("fg", out_cfg.get("fg_enabled", False)),
                     ("matte", out_cfg.get("matte_enabled", False)),
                     ("comp", out_cfg.get("comp_enabled", True)),
                     ("processed", out_cfg.get("processed_enabled", True)),
-                ] if enabled
+                ]
+                if enabled
             ] or None
             self._upload_results(
                 clip_name,
