@@ -2,11 +2,40 @@
 	import { currentJob, runningJobs, queuedJobs, jobHistory, refreshJobs, clearDismissed } from '$lib/stores/jobs';
 	import { api } from '$lib/api';
 	import type { Job } from '$lib/api';
+	import { getStoredUser } from '$lib/auth';
 	import JobRow from '../../components/JobRow.svelte';
 	import ProgressBar from '../../components/ProgressBar.svelte';
 
 	let cancelling = $state(false);
 	let expandedGroups = $state<Set<string>>(new Set());
+	let activeTab = $state<'running' | 'queue' | 'history'>('running');
+
+	// Filters
+	let searchQuery = $state('');
+	let typeFilter = $state('all');
+	let statusFilter = $state('all');  // for history tab
+
+	// Admin org filter
+	const user = getStoredUser();
+	const isAdmin = user?.tier === 'platform_admin';
+	let orgFilter = $state('all');
+	let orgList = $state<{ org_id: string; name: string }[]>([]);
+
+	// Load orgs for admin filter
+	if (isAdmin) {
+		fetch('/api/admin/orgs', {
+			headers: { 'Authorization': `Bearer ${localStorage.getItem('ck:auth_token')}` }
+		}).then(r => r.json()).then(data => {
+			orgList = data.orgs ?? [];
+		}).catch(() => {});
+	}
+
+	// Auto-switch to running tab when jobs start
+	$effect(() => {
+		if ($runningJobs.length > 0 && activeTab !== 'running') {
+			// Don't auto-switch if user is actively browsing another tab
+		}
+	});
 
 	async function cancelAll() {
 		cancelling = true;
@@ -37,7 +66,6 @@
 	}
 
 	function groupShards(jobs: Job[]): (Job | ShardGroup)[] {
-		// Deduplicate by job ID (can happen when jobs move between running/history)
 		const seen = new Set<string>();
 		const deduped: Job[] = [];
 		for (const job of jobs) {
@@ -46,10 +74,8 @@
 				deduped.push(job);
 			}
 		}
-
 		const groups = new Map<string, Job[]>();
 		const singles: Job[] = [];
-
 		for (const job of deduped) {
 			if (job.shard_group && job.shard_total > 1) {
 				const list = groups.get(job.shard_group) ?? [];
@@ -59,7 +85,6 @@
 				singles.push(job);
 			}
 		}
-
 		const result: (Job | ShardGroup)[] = [];
 		for (const [group_id, shards] of groups) {
 			result.push({
@@ -81,11 +106,32 @@
 		return 'group_id' in item;
 	}
 
-	let groupedRunning = $derived(groupShards($runningJobs));
-	let groupedQueued = $derived(groupShards($queuedJobs));
-	let groupedHistory = $derived(groupShards($jobHistory));
+	function matchesFilters(job: Job): boolean {
+		if (searchQuery) {
+			const q = searchQuery.toLowerCase();
+			if (!job.clip_name.toLowerCase().includes(q) && !job.id.toLowerCase().includes(q)) return false;
+		}
+		if (typeFilter !== 'all' && job.job_type !== typeFilter) return false;
+		if (activeTab === 'history' && statusFilter !== 'all' && job.status !== statusFilter) return false;
+		if (isAdmin && orgFilter !== 'all' && job.org_id !== orgFilter) return false;
+		return true;
+	}
+
+	let filteredRunning = $derived(groupShards($runningJobs.filter(matchesFilters)));
+	let filteredQueued = $derived(groupShards($queuedJobs.filter(matchesFilters)));
+	let filteredHistory = $derived(groupShards($jobHistory.filter(matchesFilters)));
 
 	let hasActive = $derived($runningJobs.length > 0 || $queuedJobs.length > 0);
+
+	const jobTypes = [
+		{ value: 'all', label: 'All types' },
+		{ value: 'inference', label: 'Inference' },
+		{ value: 'gvm_alpha', label: 'GVM Alpha' },
+		{ value: 'videomama_alpha', label: 'VideoMaMa' },
+		{ value: 'video_extract', label: 'Extract' },
+		{ value: 'video_stitch', label: 'Stitch' },
+		{ value: 'preview_reprocess', label: 'Preview' },
+	];
 </script>
 
 <svelte:head>
@@ -103,19 +149,58 @@
 				Refresh
 			</button>
 			{#if hasActive}
-				<button class="btn-ghost btn-danger" onclick={cancelAll} disabled={cancelling}>
-					Cancel All
-				</button>
+				<button class="btn-ghost btn-danger" onclick={cancelAll} disabled={cancelling}>Cancel All</button>
 			{/if}
 		</div>
 	</div>
 
-	<!-- Running Jobs -->
-	{#if $runningJobs.length > 0}
-		<section class="section">
-			<h2 class="section-title mono">RUNNING <span class="count">{$runningJobs.length}</span></h2>
+	<!-- Tabs -->
+	<div class="tabs">
+		<button class="tab mono" class:active={activeTab === 'running'} onclick={() => activeTab = 'running'}>
+			Running
+			{#if $runningJobs.length > 0}<span class="tab-badge">{$runningJobs.length}</span>{/if}
+		</button>
+		<button class="tab mono" class:active={activeTab === 'queue'} onclick={() => activeTab = 'queue'}>
+			Queue
+			{#if $queuedJobs.length > 0}<span class="tab-badge">{$queuedJobs.length}</span>{/if}
+		</button>
+		<button class="tab mono" class:active={activeTab === 'history'} onclick={() => activeTab = 'history'}>
+			History
+			{#if $jobHistory.length > 0}<span class="tab-badge">{$jobHistory.length}</span>{/if}
+		</button>
+	</div>
+
+	<!-- Filter bar -->
+	<div class="filter-bar">
+		<input type="text" class="filter-search mono" placeholder="Search clip name or job ID..." bind:value={searchQuery} />
+		<select class="filter-select mono" bind:value={typeFilter}>
+			{#each jobTypes as t}
+				<option value={t.value}>{t.label}</option>
+			{/each}
+		</select>
+		{#if activeTab === 'history'}
+			<select class="filter-select mono" bind:value={statusFilter}>
+				<option value="all">All statuses</option>
+				<option value="completed">Completed</option>
+				<option value="failed">Failed</option>
+				<option value="cancelled">Cancelled</option>
+			</select>
+		{/if}
+		{#if isAdmin && orgList.length > 0}
+			<select class="filter-select mono" bind:value={orgFilter}>
+				<option value="all">All orgs</option>
+				{#each orgList as org}
+					<option value={org.org_id}>{org.name}</option>
+				{/each}
+			</select>
+		{/if}
+	</div>
+
+	<!-- Tab content -->
+	{#if activeTab === 'running'}
+		{#if filteredRunning.length > 0}
 			<div class="job-list">
-				{#each groupedRunning as item}
+				{#each filteredRunning as item}
 					{#if isShardGroup(item)}
 						{@const g = item}
 						<button class="shard-group" onclick={() => toggleGroup(g.group_id)} aria-expanded={expandedGroups.has(g.group_id)}>
@@ -138,15 +223,16 @@
 					{/if}
 				{/each}
 			</div>
-		</section>
-	{/if}
+		{:else}
+			<div class="empty-tab">
+				<p class="empty-text mono">No running jobs</p>
+			</div>
+		{/if}
 
-	<!-- Queued -->
-	{#if $queuedJobs.length > 0}
-		<section class="section">
-			<h2 class="section-title mono">QUEUED <span class="count">{$queuedJobs.length}</span></h2>
+	{:else if activeTab === 'queue'}
+		{#if filteredQueued.length > 0}
 			<div class="job-list">
-				{#each groupedQueued as item, i}
+				{#each filteredQueued as item, i}
 					{#if isShardGroup(item)}
 						{@const g = item}
 						<button class="shard-group" onclick={() => toggleGroup(g.group_id)} aria-expanded={expandedGroups.has(g.group_id)}>
@@ -168,18 +254,19 @@
 					{/if}
 				{/each}
 			</div>
-		</section>
-	{/if}
-
-	<!-- History -->
-	{#if $jobHistory.length > 0}
-		<section class="section">
-			<div class="section-header">
-				<h2 class="section-title mono">HISTORY</h2>
-				<button class="clear-btn mono" onclick={clearDismissed}>SHOW ALL</button>
+		{:else}
+			<div class="empty-tab">
+				<p class="empty-text mono">Queue is empty</p>
 			</div>
+		{/if}
+
+	{:else if activeTab === 'history'}
+		<div class="history-header">
+			<button class="clear-btn mono" onclick={clearDismissed}>SHOW ALL</button>
+		</div>
+		{#if filteredHistory.length > 0}
 			<div class="job-list">
-				{#each groupedHistory as item}
+				{#each filteredHistory as item}
 					{#if isShardGroup(item)}
 						{@const g = item}
 						<button class="shard-group" onclick={() => toggleGroup(g.group_id)} aria-expanded={expandedGroups.has(g.group_id)}>
@@ -201,17 +288,11 @@
 					{/if}
 				{/each}
 			</div>
-		</section>
-	{/if}
-
-	{#if $runningJobs.length === 0 && $queuedJobs.length === 0 && $jobHistory.length === 0}
-		<div class="empty-state">
-			<svg width="48" height="48" viewBox="0 0 48 48" fill="none">
-				<path d="M8 16l16 9.5L40 16M8 24l16 9.5L40 24M8 32l16 9.5L40 32M8 8L24 17.5 40 8 24 0 8 8z" stroke="var(--text-tertiary)" stroke-width="1.5" stroke-linejoin="round"/>
-			</svg>
-			<p class="empty-text">No jobs</p>
-			<p class="empty-hint mono">Submit a job from a clip's detail page.</p>
-		</div>
+		{:else}
+			<div class="empty-tab">
+				<p class="empty-text mono">No job history</p>
+			</div>
+		{/if}
 	{/if}
 </div>
 
@@ -220,7 +301,7 @@
 		padding: var(--sp-5) var(--sp-6);
 		display: flex;
 		flex-direction: column;
-		gap: var(--sp-4);
+		gap: var(--sp-3);
 	}
 
 	.page-header {
@@ -255,91 +336,83 @@
 		cursor: pointer;
 		transition: all 0.15s;
 	}
+	.btn-ghost:hover { color: var(--text-primary); border-color: var(--text-tertiary); background: var(--surface-2); }
+	.btn-ghost:disabled { opacity: 0.5; cursor: not-allowed; }
+	.btn-danger { color: var(--state-error); border-color: rgba(255, 82, 82, 0.3); }
+	.btn-danger:hover { color: var(--state-error) !important; background: rgba(255, 82, 82, 0.08) !important; border-color: rgba(255, 82, 82, 0.5) !important; }
 
-	.btn-ghost:hover {
-		color: var(--text-primary);
-		border-color: var(--text-tertiary);
-		background: var(--surface-2);
-	}
-
-	.btn-ghost:disabled {
-		opacity: 0.5;
-		cursor: not-allowed;
-	}
-
-	.btn-danger {
-		color: var(--state-error);
-		border-color: rgba(255, 82, 82, 0.3);
-	}
-
-	.btn-danger:hover {
-		color: var(--state-error) !important;
-		background: rgba(255, 82, 82, 0.08) !important;
-		border-color: rgba(255, 82, 82, 0.5) !important;
-	}
-
-	.section {
+	/* Tabs */
+	.tabs {
 		display: flex;
-		flex-direction: column;
 		gap: 0;
+		border-bottom: 1px solid var(--border);
 	}
 
-	.section-title {
-		font-size: 10px;
-		font-weight: 600;
-		letter-spacing: 0.1em;
-		color: var(--text-tertiary);
+	.tab {
 		padding: var(--sp-2) var(--sp-4);
-		background: var(--surface-1);
-		border: 1px solid var(--border);
-		border-radius: 8px 8px 0 0;
+		font-size: 11px;
+		font-weight: 600;
+		letter-spacing: 0.06em;
+		color: var(--text-tertiary);
+		background: none;
+		border: none;
+		border-bottom: 2px solid transparent;
+		cursor: pointer;
+		transition: all 0.15s;
 		display: flex;
 		align-items: center;
 		gap: var(--sp-2);
 	}
+	.tab:hover { color: var(--text-secondary); }
+	.tab.active { color: var(--accent); border-bottom-color: var(--accent); }
 
-	.section-header {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-	}
-
-	.section-header .section-title {
-		border-radius: 8px 8px 0 0;
-		flex: 1;
-	}
-
-	.clear-btn {
-		font-size: 9px;
-		letter-spacing: 0.06em;
-		color: var(--text-tertiary);
-		background: var(--surface-1);
-		border: 1px solid var(--border);
-		border-bottom: none;
-		border-radius: 0 8px 0 0;
-		padding: var(--sp-2) var(--sp-3);
-		cursor: pointer;
-		transition: color 0.15s;
-	}
-	.clear-btn:hover { color: var(--text-secondary); }
-
-	.count {
+	.tab-badge {
 		display: inline-flex;
 		align-items: center;
 		justify-content: center;
-		min-width: 16px;
-		height: 16px;
-		padding: 0 4px;
-		font-size: 9px;
+		min-width: 18px;
+		height: 18px;
+		padding: 0 5px;
+		font-size: 10px;
 		background: var(--surface-4);
-		border-radius: 8px;
+		border-radius: 9px;
 		color: var(--text-secondary);
 	}
+	.tab.active .tab-badge { background: rgba(255, 242, 3, 0.15); color: var(--accent); }
 
+	/* Filter bar */
+	.filter-bar {
+		display: flex;
+		gap: var(--sp-2);
+		align-items: center;
+	}
+
+	.filter-search {
+		flex: 1;
+		padding: 7px 10px;
+		background: var(--surface-2);
+		border: 1px solid var(--border);
+		border-radius: 6px;
+		color: var(--text-primary);
+		font-size: 12px;
+		outline: none;
+	}
+	.filter-search:focus { border-color: var(--accent); }
+	.filter-search::placeholder { color: var(--text-tertiary); }
+
+	.filter-select {
+		padding: 7px 10px;
+		background: var(--surface-2);
+		border: 1px solid var(--border);
+		border-radius: 6px;
+		color: var(--text-primary);
+		font-size: 12px;
+	}
+
+	/* Job list */
 	.job-list {
 		border: 1px solid var(--border);
-		border-top: none;
-		border-radius: 0 0 8px 8px;
+		border-radius: 8px;
 		overflow: hidden;
 		background: var(--surface-1);
 	}
@@ -358,10 +431,7 @@
 		background: linear-gradient(90deg, rgba(0, 154, 218, 0.04), transparent);
 		border-left: 3px solid var(--secondary);
 	}
-
-	.shard-group:hover {
-		background: var(--surface-2);
-	}
+	.shard-group:hover { background: var(--surface-2); }
 
 	.shard-group-header {
 		display: flex;
@@ -370,60 +440,35 @@
 		margin-bottom: var(--sp-2);
 	}
 
-	.type-dot {
-		width: 7px;
-		height: 7px;
-		border-radius: 50%;
-		flex-shrink: 0;
-	}
+	.type-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
 
 	.shard-group-label {
-		font-size: 9px;
-		font-weight: 600;
-		color: var(--secondary);
-		padding: 1px 5px;
-		border: 1px solid var(--secondary-muted);
-		border-radius: 3px;
-		letter-spacing: 0.06em;
+		font-size: 9px; font-weight: 600; color: var(--secondary);
+		padding: 1px 5px; border: 1px solid var(--secondary-muted); border-radius: 3px; letter-spacing: 0.06em;
 	}
+	.shard-group-clip { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+	.shard-group-info { margin-left: auto; font-size: 10px; color: var(--text-secondary); }
+	.shard-group-expand { font-size: 9px; color: var(--text-tertiary); margin-left: var(--sp-1); }
 
-	.shard-group-clip {
-		font-size: 13px;
-		font-weight: 600;
-		color: var(--text-primary);
-	}
-
-	.shard-group-info {
-		margin-left: auto;
-		font-size: 10px;
-		color: var(--text-secondary);
-	}
-
-	.shard-group-expand {
-		font-size: 9px;
-		color: var(--text-tertiary);
-		margin-left: var(--sp-1);
-	}
-
-	.empty-state {
+	/* History header */
+	.history-header {
 		display: flex;
-		flex-direction: column;
+		justify-content: flex-end;
+	}
+
+	.clear-btn {
+		font-size: 9px; letter-spacing: 0.06em; color: var(--text-tertiary);
+		background: transparent; border: 1px solid var(--border); border-radius: 4px;
+		padding: 4px 8px; cursor: pointer; transition: color 0.15s;
+	}
+	.clear-btn:hover { color: var(--text-secondary); }
+
+	/* Empty state */
+	.empty-tab {
+		display: flex;
 		align-items: center;
 		justify-content: center;
-		gap: var(--sp-3);
 		padding: var(--sp-8) 0;
-		text-align: center;
 	}
-
-	.empty-text {
-		font-size: 15px;
-		font-weight: 500;
-		color: var(--text-secondary);
-	}
-
-	.empty-hint {
-		font-size: 11px;
-		color: var(--text-tertiary);
-		max-width: 300px;
-	}
+	.empty-text { font-size: 13px; color: var(--text-tertiary); }
 </style>
