@@ -187,7 +187,7 @@ def list_jobs(request: Request):
         current=_job_to_schema(running[0], is_admin=admin) if running else None,
         running=[_job_to_schema(j, is_admin=admin) for j in running],
         queued=queued_schemas,
-        history=[_job_to_schema(j, is_admin=admin) for j in history],
+        history=[_job_to_schema(j, is_admin=admin) for j in reversed(history)],
     )
 
 
