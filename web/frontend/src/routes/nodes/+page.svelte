@@ -414,8 +414,9 @@
       - ck-weights-vm:/app/VideoMaMaInferenceModule/checkpoints
       - ck-compile-cache:/app/.cache/corridorkey
 
+  # Auto-updater: pulls new node images when you push a cloud tag
   watchtower:
-    image: containrrr/watchtower
+    image: nickfedor/watchtower
     restart: unless-stopped
     environment:
       - WATCHTOWER_CLEANUP=true
@@ -454,8 +455,9 @@ volumes:
       - ck-weights-vm:/app/VideoMaMaInferenceModule/checkpoints
       - ck-compile-cache:/app/.cache/corridorkey
 
+  # Auto-updater: pulls new node images when you push a cloud tag
   watchtower:
-    image: containrrr/watchtower
+    image: nickfedor/watchtower
     restart: unless-stopped
     environment:
       - WATCHTOWER_CLEANUP=true
