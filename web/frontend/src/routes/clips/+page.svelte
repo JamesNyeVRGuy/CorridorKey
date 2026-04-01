@@ -203,13 +203,68 @@
 	function showClipContext(e: MouseEvent, clip: Clip, project: Project) {
 		e.preventDefault();
 		const otherProjects = projects.filter(p => p.name !== project.name);
-		const moveItems: MenuItem[] = otherProjects.map(p => ({
-			label: p.display_name,
+
+		// Move to other projects
+		const moveProjectItems: MenuItem[] = otherProjects.map(p => ({
+			label: `📁 ${p.display_name}`,
 			action: async () => {
 				await api.clips.move(clip.name, p.name);
 				await Promise.all([loadProjects(), refreshClips()]);
 			},
 		}));
+
+		// Move to folders within current project
+		const currentFolders = project.folders || [];
+		const moveFolderItems: MenuItem[] = [];
+
+		// "Move to loose clips" option (if clip is in a folder)
+		if (clip.folder_name) {
+			moveFolderItems.push({
+				label: '↑ Loose clips (no folder)',
+				action: async () => {
+					await api.clips.move(clip.name, project.name);
+					await Promise.all([loadProjects(), refreshClips()]);
+				},
+			});
+		}
+
+		// Move to existing folders in this project
+		for (const f of currentFolders) {
+			if (f.name === clip.folder_name) continue; // skip current folder
+			moveFolderItems.push({
+				label: `📂 ${f.display_name}`,
+				action: async () => {
+					await api.clips.move(clip.name, project.name, f.name);
+					await Promise.all([loadProjects(), refreshClips()]);
+				},
+			});
+		}
+
+		// Create new folder and move
+		moveFolderItems.push({
+			label: '+ New folder...',
+			action: async () => {
+				const name = prompt('Folder name:');
+				if (!name?.trim()) return;
+				try {
+					const folder = await api.projects.createFolder(project.name, name.trim());
+					await api.clips.move(clip.name, project.name, folder.name);
+					await Promise.all([loadProjects(), refreshClips()]);
+				} catch (err) {
+					toast.error(err instanceof Error ? err.message : String(err));
+				}
+			},
+		});
+
+		const allMoveItems: MenuItem[] = [];
+		if (moveFolderItems.length > 0) {
+			allMoveItems.push({ label: 'Move to folder', disabled: true, action: () => {} });
+			allMoveItems.push(...moveFolderItems);
+		}
+		if (moveProjectItems.length > 0) {
+			allMoveItems.push({ label: 'Move to project', disabled: true, action: () => {} });
+			allMoveItems.push(...moveProjectItems);
+		}
 
 		ctxItems = [
 			{
@@ -225,8 +280,8 @@
 				},
 			},
 			{ label: '---', action: () => {} },
-			...(moveItems.length > 0
-				? [{ label: 'Move to...', disabled: true, action: () => {} }, ...moveItems, { label: '---', action: () => {} }]
+			...(allMoveItems.length > 0
+				? [...allMoveItems, { label: '---', action: () => {} }]
 				: []),
 			{
 				label: 'Delete Clip',
