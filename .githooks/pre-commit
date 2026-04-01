@@ -1,0 +1,19 @@
+#!/bin/bash
+# Pre-commit hook: lint + format check
+# Install: git config core.hooksPath .githooks
+
+echo "Running pre-commit checks..."
+
+# Lint
+if ! uv run ruff check 2>/dev/null; then
+    echo "❌ ruff check failed. Run 'uv run ruff check --fix' to auto-fix."
+    exit 1
+fi
+
+# Format
+if ! uv run ruff format --check 2>/dev/null; then
+    echo "❌ ruff format failed. Run 'uv run ruff format' to auto-fix."
+    exit 1
+fi
+
+echo "✅ Pre-commit checks passed."
