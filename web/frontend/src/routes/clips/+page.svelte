@@ -191,7 +191,7 @@
 			label: p.display_name,
 			action: async () => {
 				await api.clips.move(clip.name, p.name);
-				await loadProjects();
+				await Promise.all([loadProjects(), refreshClips()]);
 			},
 		}));
 
@@ -534,7 +534,7 @@
 								if (clipName) {
 									try {
 										await api.clips.move(clipName, project.name);
-										await loadProjects();
+										await Promise.all([loadProjects(), refreshClips()]);
 									} catch (err) {
 										toast.error(err instanceof Error ? err.message : String(err));
 									}
@@ -576,7 +576,7 @@
 														if (!target) return;
 														try {
 															await api.clips.move(clip.name, target);
-															await loadProjects();
+															await Promise.all([loadProjects(), refreshClips()]);
 														} catch (err) {
 															toast.error(err instanceof Error ? err.message : String(err));
 														}
