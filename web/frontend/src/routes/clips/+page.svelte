@@ -227,7 +227,12 @@
 		ctxY = e.clientY;
 		ctxVisible = true;
 	}
-	let collapsedProjects = $state<Set<string>>(new Set());
+	function _loadCollapsed(): Set<string> {
+		try { const raw = localStorage.getItem('ck:collapsed_projects'); return raw ? new Set(JSON.parse(raw)) : new Set(); }
+		catch { return new Set(); }
+	}
+	function _saveCollapsed(s: Set<string>) { localStorage.setItem('ck:collapsed_projects', JSON.stringify([...s])); }
+	let collapsedProjects = $state<Set<string>>(_loadCollapsed());
 
 	// Search + state filter
 	let searchQuery = $state('');
@@ -349,6 +354,7 @@
 		if (next.has(name)) next.delete(name);
 		else next.add(name);
 		collapsedProjects = next;
+		_saveCollapsed(next);
 	}
 
 	function onDrop(e: DragEvent) { e.preventDefault(); dragOver = false; if (e.dataTransfer?.files.length) handleFiles(e.dataTransfer.files); }
