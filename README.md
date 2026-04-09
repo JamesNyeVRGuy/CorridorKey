@@ -72,8 +72,6 @@ services:
   corridorkey-node:
     image: ghcr.io/jamesnyevrguy/corridorkey-node:nvidia
     restart: unless-stopped
-    labels:
-      - com.centurylinklabs.watchtower.enable=true
     deploy:
       resources:
         reservations:
@@ -91,17 +89,6 @@ services:
       - ck-weights-gvm:/app/gvm_core/weights
       - ck-weights-vm:/app/VideoMaMaInferenceModule/checkpoints
       - ck-compile-cache:/app/.cache/corridorkey
-
-  # Auto-updater: pulls new node images when you push a cloud tag
-  watchtower:
-    image: nickfedor/watchtower
-    restart: unless-stopped
-    environment:
-      - WATCHTOWER_CLEANUP=true
-      - WATCHTOWER_POLL_INTERVAL=300
-      - WATCHTOWER_LABEL_ENABLE=true
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
 
 volumes:
   ck-weights:
@@ -155,7 +142,6 @@ The standalone binary ships with CPU torch and downloads GPU acceleration (CUDA 
 - **GPU credit system** — contribute compute, earn processing credits
 - **Shared storage** — mount the same NAS on server and nodes for zero-transfer processing
 - **Auto weight sync** — nodes download model weights on first start
-- **Watchtower auto-update** — Docker nodes pull new images automatically
 - **Per-node scheduling** — set active hours for overnight rendering
 - **Pause / resume** — stop accepting jobs without shutting down
 - **Node health monitoring** — CPU, RAM, VRAM, job history, logs viewable from the web UI

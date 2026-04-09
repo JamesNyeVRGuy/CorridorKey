@@ -83,8 +83,6 @@
   corridorkey-node:
     image: ${nodeImage}
     restart: unless-stopped
-    labels:
-      - com.centurylinklabs.watchtower.enable=true
     deploy:
       resources:
         reservations:
@@ -103,17 +101,6 @@
       - ck-weights-vm:/app/VideoMaMaInferenceModule/checkpoints
       - ck-compile-cache:/app/.cache/corridorkey
 
-  # Auto-updater: pulls new node images when you push a cloud tag
-  watchtower:
-    image: nickfedor/watchtower
-    restart: unless-stopped
-    environment:
-      - WATCHTOWER_CLEANUP=true
-      - WATCHTOWER_POLL_INTERVAL=300
-      - WATCHTOWER_LABEL_ENABLE=true
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-
 volumes:
   ck-weights:
   ck-weights-gvm:
@@ -124,8 +111,6 @@ volumes:
   corridorkey-node:
     image: ${nodeImage}
     restart: unless-stopped
-    labels:
-      - com.centurylinklabs.watchtower.enable=true
     devices:
       - /dev/kfd
       - /dev/dri
@@ -143,17 +128,6 @@ volumes:
       - ck-weights-gvm:/app/gvm_core/weights
       - ck-weights-vm:/app/VideoMaMaInferenceModule/checkpoints
       - ck-compile-cache:/app/.cache/corridorkey
-
-  # Auto-updater: pulls new node images when you push a cloud tag
-  watchtower:
-    image: nickfedor/watchtower
-    restart: unless-stopped
-    environment:
-      - WATCHTOWER_CLEANUP=true
-      - WATCHTOWER_POLL_INTERVAL=300
-      - WATCHTOWER_LABEL_ENABLE=true
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
 
 volumes:
   ck-weights:
