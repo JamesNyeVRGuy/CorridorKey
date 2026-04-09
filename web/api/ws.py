@@ -256,7 +256,8 @@ def _validate_ws_token(token: str) -> dict[str, Any] | None:
         import jwt as pyjwt
 
         return pyjwt.decode(token, JWT_SECRET, algorithms=JWT_ALGORITHMS, audience="authenticated")
-    except Exception:
+    except Exception as e:
+        logger.warning(f"WebSocket JWT validation failed: {e}")
         return None
 
 
@@ -276,10 +277,12 @@ async def websocket_endpoint(ws: WebSocket) -> None:
     if AUTH_ENABLED:
         token = ws.query_params.get("token", "")
         if not token:
+            logger.warning("WebSocket rejected: no token in query params")
             await ws.close(code=4001, reason="Missing token")
             return
         claims = _validate_ws_token(token)
         if claims is None:
+            logger.warning("WebSocket rejected: JWT validation failed (see warning above)")
             await ws.close(code=4001, reason="Invalid token")
             return
         user_id = claims.get("sub", "")
