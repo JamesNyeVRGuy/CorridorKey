@@ -266,6 +266,39 @@ def change_password(req: ChangePasswordRequest, request: Request):
         raise HTTPException(status_code=400, detail="Password change failed") from e
 
 
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
+
+@router.post("/forgot-password")
+def forgot_password(req: ForgotPasswordRequest):
+    """Proxy password recovery to GoTrue. Sends a reset email."""
+    import urllib.request
+
+    if not req.email:
+        raise HTTPException(status_code=400, detail="Email required")
+
+    gotrue_url = os.environ.get(
+        "CK_GOTRUE_INTERNAL_URL", os.environ.get("CK_GOTRUE_URL", "http://localhost:54324")
+    ).strip()
+
+    try:
+        body = json.dumps({"email": req.email}).encode()
+        gotrue_req = urllib.request.Request(
+            f"{gotrue_url}/recover",
+            data=body,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(gotrue_req, timeout=10) as resp:
+            resp.read()
+        return {"status": "sent"}
+    except Exception as e:
+        logger.error(f"GoTrue password recovery error: {e}")
+        # Don't reveal whether the email exists — always return success
+        return {"status": "sent"}
+
+
 @router.get("/status")
 def auth_status():
     """Check if auth is enabled and return configuration hints."""

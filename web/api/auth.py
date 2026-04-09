@@ -42,6 +42,7 @@ PUBLIC_PATHS = {
     "/api/auth/register",
     "/api/auth/refresh",
     "/api/auth/callback",
+    "/api/auth/forgot-password",
     "/api/auth/status",
     "/api/status",
     "/api/status/badge",

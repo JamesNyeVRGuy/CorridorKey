@@ -380,6 +380,7 @@
 		justify-content: space-between;
 		overflow: hidden;
 		position: relative;
+		height: 100vh;
 	}
 
 	.sidebar::before {
@@ -396,6 +397,9 @@
 	.sidebar-top {
 		display: flex;
 		flex-direction: column;
+		overflow-y: auto;
+		min-height: 0;
+		flex: 1;
 	}
 
 	.logo {
@@ -526,6 +530,7 @@
 		display: flex;
 		flex-direction: column;
 		gap: var(--sp-3);
+		flex-shrink: 0;
 	}
 
 	.device-row {

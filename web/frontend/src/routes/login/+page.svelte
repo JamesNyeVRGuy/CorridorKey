@@ -6,6 +6,8 @@
 	let password = $state('');
 	let error = $state('');
 	let loading = $state(false);
+	let resetSent = $state(false);
+	let resetLoading = $state(false);
 
 	async function handleLogin() {
 		if (!email || !password) {
@@ -28,6 +30,27 @@
 			error = e instanceof Error ? e.message : 'Login failed';
 		} finally {
 			loading = false;
+		}
+	}
+
+	async function handleForgotPassword() {
+		if (!email) {
+			error = 'Enter your email address first';
+			return;
+		}
+		resetLoading = true;
+		error = '';
+		try {
+			await fetch('/api/auth/forgot-password', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ email }),
+			});
+			resetSent = true;
+		} catch {
+			error = 'Failed to send reset email';
+		} finally {
+			resetLoading = false;
 		}
 	}
 
@@ -62,6 +85,15 @@
 				<span class="field-label mono">PASSWORD</span>
 				<input type="password" bind:value={password} placeholder="••••••••" onkeydown={onKeydown} />
 			</label>
+			<div class="forgot-row">
+				{#if resetSent}
+					<span class="reset-sent mono">Reset link sent — check your email</span>
+				{:else}
+					<button class="forgot-btn" onclick={handleForgotPassword} disabled={resetLoading}>
+						{resetLoading ? 'Sending...' : 'Forgot password?'}
+					</button>
+				{/if}
+			</div>
 			<button class="auth-btn" onclick={handleLogin} disabled={loading}>
 				{loading ? 'Signing in...' : 'Sign In'}
 			</button>
@@ -151,6 +183,20 @@
 	}
 	.auth-btn:hover:not(:disabled) { background: #fff; box-shadow: 0 0 16px rgba(255, 242, 3, 0.25); }
 	.auth-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+	.forgot-row { display: flex; justify-content: flex-end; margin-top: calc(-1 * var(--sp-1)); }
+	.forgot-btn {
+		background: none;
+		border: none;
+		color: var(--text-tertiary);
+		font-size: 12px;
+		cursor: pointer;
+		padding: 0;
+		font-family: inherit;
+	}
+	.forgot-btn:hover { color: var(--accent); }
+	.forgot-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+	.reset-sent { font-size: 12px; color: var(--state-success, #4caf50); }
 
 	.auth-footer { font-size: 13px; color: var(--text-tertiary); }
 	.auth-footer a { color: var(--accent); }
