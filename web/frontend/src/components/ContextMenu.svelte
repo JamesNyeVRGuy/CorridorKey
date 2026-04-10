@@ -29,7 +29,15 @@
 		item.action();
 	}
 
+	let _openedAt = 0;
+
+	$effect(() => {
+		if (visible) _openedAt = Date.now();
+	});
+
 	function onClickOutside(e: MouseEvent) {
+		// Ignore the same click that opened the menu (button → window bubble)
+		if (Date.now() - _openedAt < 50) return;
 		if (menuEl && !menuEl.contains(e.target as Node)) {
 			visible = false;
 		}
