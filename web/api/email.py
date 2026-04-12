@@ -60,7 +60,7 @@ def send_email(to: str, subject: str, html_body: str, text_body: str | None = No
                     server.ehlo()
                 if _SMTP_USER and _SMTP_PASS:
                     server.login(_SMTP_USER, _SMTP_PASS)
-            
+
             server.sendmail(_FROM_EMAIL, to, msg.as_string())
 
         logger.info(f"MAIL:Email sent to {to}: {subject}")

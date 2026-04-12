@@ -403,6 +403,7 @@ def signup_with_invite(req: SignupRequest):
         "CK_GOTRUE_INTERNAL_URL", os.environ.get("CK_GOTRUE_URL", "http://localhost:54324")
     ).strip()
     service_key = os.environ.get("CK_SUPABASE_SERVICE_KEY", "").strip()
+    anon_key = os.environ.get("ANON_KEY", "").strip()
 
     try:
         if service_key:
@@ -432,27 +433,30 @@ def signup_with_invite(req: SignupRequest):
                 user_id = user_data.get("id", req.email)
 
             # Trigger OTP/magic link email
-            otp_body = json.dumps({
-                "email": req.email,
-                "create_user": False,  # User already exists
-                "data": {
-                    "name": req.name,
+            otp_body = json.dumps(
+                {
+                    "email": req.email,
+                    "create_user": False,  # User already exists
+                    "data": {
+                        "name": req.name,
+                    },
                 }
-            }).encode()
-            
+            ).encode()
+
             otp_req = urllib.request.Request(
                 f"{gotrue_url}/otp",
                 data=otp_body,
-               headers={
+                headers={
                     "Content-Type": "application/json",
-                    "Authorization": f"Bearer {service_key}",
+                    "apikey": anon_key,
                 },
                 method="POST",
             )
             with urllib.request.urlopen(otp_req, timeout=10) as resp:
+                logger.info(f"MAIL:Email sent to {req.email} (confirmation)")
                 user_data = json.loads(resp.read())
                 user_id = user_data.get("id", req.email)
-                #Email Sent
+                # Email Sent
         else:
             # Fallback: direct signup (only works if DISABLE_SIGNUP=false)
             import urllib.request
