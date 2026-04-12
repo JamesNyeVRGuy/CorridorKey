@@ -413,7 +413,7 @@ def signup_with_invite(req: SignupRequest):
                 {
                     "email": req.email,
                     "password": req.password,
-                    "email_confirm": True,
+                    "email_confirm": False,
                     "app_metadata": {"tier": "pending"},
                     "user_metadata": {"name": req.name},
                 }
@@ -430,6 +430,29 @@ def signup_with_invite(req: SignupRequest):
             with urllib.request.urlopen(admin_req, timeout=10) as resp:
                 user_data = json.loads(resp.read())
                 user_id = user_data.get("id", req.email)
+
+            # Trigger OTP/magic link email
+            otp_body = json.dumps({
+                "email": req.email,
+                "create_user": False,  # User already exists
+                "data": {
+                    "name": req.name,
+                }
+            }).encode()
+            
+            otp_req = urllib.request.Request(
+                f"{gotrue_url}/otp",
+                data=otp_body,
+               headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {service_key}",
+                },
+                method="POST",
+            )
+            with urllib.request.urlopen(otp_req, timeout=10) as resp:
+                user_data = json.loads(resp.read())
+                user_id = user_data.get("id", req.email)
+                #Email Sent
         else:
             # Fallback: direct signup (only works if DISABLE_SIGNUP=false)
             import urllib.request
