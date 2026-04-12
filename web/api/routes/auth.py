@@ -409,6 +409,7 @@ def signup_with_invite(req: SignupRequest):
         if service_key:
             # Use admin API (bypasses DISABLE_SIGNUP)
             import urllib.request
+
             admin_body = json.dumps(
                 {
                     "email": req.email,
@@ -448,7 +449,7 @@ def signup_with_invite(req: SignupRequest):
                 method="POST",
             )
             logger.info(f"Triggering OTP email via GoTrue: {req.email}")
-            
+
             with urllib.request.urlopen(otp_req, timeout=10) as resp:
                 logger.info(f"MAIL:Email sent to {req.email} (confirmation)")
                 user_data = json.loads(resp.read())
@@ -508,9 +509,11 @@ def open_register(req: RegisterRequest):
     service_key = os.environ.get("CK_SUPABASE_SERVICE_KEY", "").strip()
     anon_key = os.environ.get("ANON_KEY", "").strip()
 
-
     if not service_key or not anon_key:
-        raise HTTPException(status_code=500, detail="Server is not configured for open registration, check CK_SUPABASE_SERVICE_KEY and ANON_KEY")
+        raise HTTPException(
+            status_code=500,
+            detail="Server is not configured for open registration, check CK_SUPABASE_SERVICE_KEY and ANON_KEY",
+        )
 
     try:
         import urllib.request
@@ -542,7 +545,7 @@ def open_register(req: RegisterRequest):
             user_data = json.loads(resp.read())
             user_id = user_data.get("id", req.email)
 
-         # Trigger OTP/magic link email
+        # Trigger OTP/magic link email
         otp_body = json.dumps(
             {
                 "email": req.email,
@@ -559,7 +562,7 @@ def open_register(req: RegisterRequest):
             method="POST",
         )
         logger.info(f"Triggering OTP email via GoTrue: {req.email}")
-        
+
         with urllib.request.urlopen(otp_req, timeout=10) as resp:
             logger.info(f"MAIL:Email sent to {req.email} (confirmation)")
             user_data = json.loads(resp.read())
