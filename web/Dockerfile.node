@@ -5,17 +5,28 @@
 #
 # Security: runs as non-root (uid 1000), agent refuses to run as root.
 #
-# Build (NVIDIA): docker build -f web/Dockerfile.node -t corridorkey-node:nvidia .
-# Build (AMD):    docker build -f web/Dockerfile.node --build-arg GPU_VENDOR=amd -t corridorkey-node:amd .
-# Run (NVIDIA):   docker run --gpus all -e CK_MAIN_URL=http://host:3000 corridorkey-node:nvidia
-# Run (AMD):      docker run --device /dev/kfd --device /dev/dri -e CK_MAIN_URL=http://host:3000 corridorkey-node:amd
+# Build (NVIDIA):       docker build -f web/Dockerfile.node -t corridorkey-node:nvidia .
+# Build (AMD):          docker build -f web/Dockerfile.node --build-arg GPU_VENDOR=amd -t corridorkey-node:amd .
+# Build (NVIDIA NGC):   docker build --platform <architecture-id> -f web/Dockerfile.node --build-arg GPU_VENDOR=nvidia-container -t corridorkey-node:nvidiangc .
+# Run (NVIDIA):         docker run --gpus all -e CK_MAIN_URL=http://host:3000 corridorkey-node:nvidia
+# Run (AMD):            docker run --device /dev/kfd --device /dev/dri -e CK_MAIN_URL=http://host:3000 corridorkey-node:amd
+# Run (NVIDIA NGC):     docker run --gpus all --ipc=host --ulimit memlock=1 --ulimit stack=67108864 -e CK_MAIN_URL=http://host:3000 corridorkey-node:nvidiangc
 
 ARG GPU_VENDOR=nvidia
+# Only consumed by the nvidia-container stage; ignored for other vendors.
+ARG PYTORCH_CONTAINER_VERSION=26.03
 
-FROM ghcr.io/astral-sh/uv:0.7-python3.11-bookworm-slim
+# NVIDIA / AMD
+FROM ghcr.io/astral-sh/uv:0.7-python3.11-bookworm-slim AS base-nvidia
+FROM ghcr.io/astral-sh/uv:0.7-python3.11-bookworm-slim AS base-amd
+# NVIDIA NGC Container
+FROM nvcr.io/nvidia/pytorch:${PYTORCH_CONTAINER_VERSION}-py3 AS base-nvidia-container
+# Inject uv to manage the dependency graph in this runtime
+COPY --from=ghcr.io/astral-sh/uv:0.7 /uv /usr/local/bin/uv
 
 # Re-declare after FROM (ARGs are reset by FROM)
 ARG GPU_VENDOR
+FROM base-${GPU_VENDOR} AS runtime
 
 WORKDIR /app
 
@@ -39,9 +50,16 @@ COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     if [ "$GPU_VENDOR" = "amd" ]; then \
         uv sync --frozen --no-dev --no-install-project && \
-        uv pip install torch==2.8.0 torchvision==0.23.0 --index-url https://download.pytorch.org/whl/rocm6.3 && \
+        uv pip install torch==2.8.0 torchvision==0.23.0 \
+            --index-url https://download.pytorch.org/whl/rocm6.3 && \
         uv pip install pyrsmi; \
+    elif [ "$GPU_VENDOR" = "nvidia-container" ]; then \
+        # Creates venv with system package access, then installs project dependencies and reconciles environment with uv dependency graph
+        uv venv --python "$(python3 -c 'import sys; print(sys.executable)')" \
+                 --system-site-packages .venv && \
+        uv sync --no-dev --extra system-torch --no-install-project; \
     else \
+        # Standalone CUDA: pull torch from the PyTorch CUDA index (amd64 only).
         uv sync --frozen --no-dev --extra cuda --no-install-project; \
     fi
 
@@ -61,6 +79,8 @@ COPY --chown=nodeuser:nodeuser README.md ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     if [ "$GPU_VENDOR" = "amd" ]; then \
         uv sync --frozen --no-dev; \
+    elif [ "$GPU_VENDOR" = "nvidia-container" ]; then \
+        uv sync --frozen --no-dev --extra system-torch; \
     else \
         uv sync --frozen --no-dev --extra cuda; \
     fi
@@ -79,7 +99,8 @@ RUN mkdir -p CorridorKeyModule/checkpoints \
     /tmp/ck-work \
     /app/.cache/corridorkey \
     /app/.cache/matplotlib \
-    .venv/lib/python3.11/site-packages/corridorkey-1.0.0.dist-info
+    find .venv/lib -maxdepth 4 -name "corridorkey*.dist-info" \
+        -exec chown -R nodeuser:nodeuser {} +
 
 # Run as non-root
 USER nodeuser
