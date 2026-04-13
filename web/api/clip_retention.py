@@ -157,6 +157,27 @@ def cleanup_once(base_clips_dir: str) -> dict[str, list[str]]:
 
     result: dict[str, list[str]] = {}
     total_freed = 0
+    cas_removed = 0
+
+    cas_dir = os.path.join(base_clips_dir, ".cas")
+    if os.path.isdir(cas_dir):
+        for fname in os.listdir(cas_dir):
+            if fname.startswith("."):
+                continue
+            path = os.path.join(cas_dir, fname)
+            try:
+                st = os.stat(path)
+                if st.st_nlink == 1:
+                    if time.time() - st.st_ctime > 3600:
+                        freed = st.st_size
+                        os.remove(path)
+                        total_freed += freed
+                        cas_removed += 1
+                        logger.info(f"Cleaned up CAS file: {fname} ({freed} bytes)")
+            except FileNotFoundError:
+                pass
+            except Exception:
+                logger.warning(f"Failed to stat/remove CAS file {path}", exc_info=True)
 
     for org_id in os.listdir(base_clips_dir):
         org_dir = os.path.join(base_clips_dir, org_id)
@@ -205,7 +226,12 @@ def cleanup_once(base_clips_dir: str) -> dict[str, list[str]]:
 
     if total_freed > 0:
         clip_count = sum(len(v) for v in result.values())
-        logger.info(f"Cleanup cycle complete: freed {total_freed / 1e9:.2f}GB across {clip_count} clips")
+        parts = []
+        if clip_count:
+            parts.append(f"{clip_count} clips")
+        if cas_removed:
+            parts.append(f"{cas_removed} CAS files")
+        logger.info(f"Cleanup cycle complete: freed {total_freed / 1e9:.2f}GB across {', '.join(parts)}")
 
     return result
 

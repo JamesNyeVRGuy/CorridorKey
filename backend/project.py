@@ -20,6 +20,7 @@ Legacy v1 format (no clips/ dir) is still supported for backward compat.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -158,6 +159,7 @@ def create_project(
             clips_dir,
             video_path,
             copy_source=copy_source,
+            cas_root=root,
         )
         clip_names.append(clip_name)
 
@@ -205,6 +207,7 @@ def add_clips_to_project(
             target_dir,
             video_path,
             copy_source=copy_source,
+            cas_root=os.path.dirname(project_dir),
         )
         new_paths.append(os.path.join(target_dir, clip_name))
 
@@ -224,6 +227,7 @@ def _create_clip_folder(
     video_path: str,
     *,
     copy_source: bool = True,
+    cas_root: str | None = None,
 ) -> str:
     """Create a single clip subfolder inside clips_dir.
 
@@ -241,8 +245,51 @@ def _create_clip_folder(
     if copy_source:
         target = os.path.join(source_dir, filename)
         if not os.path.isfile(target):
-            shutil.copy2(video_path, target)
-            logger.info(f"Copied source video: {video_path} -> {target}")
+            base_dir = cas_root or projects_root()
+            cas_dir = os.path.join(base_dir, ".cas")
+            os.makedirs(cas_dir, exist_ok=True)
+            ext = os.path.splitext(filename)[1][:20].lower()
+
+            cas_tmp = os.path.join(cas_dir, f".{uuid.uuid4().hex}{ext}.tmp")
+            try:
+                hasher = hashlib.sha256()
+                with open(video_path, "rb") as src, open(cas_tmp, "wb") as dst:
+                    while chunk := src.read(8 * 1024 * 1024):
+                        hasher.update(chunk)
+                        dst.write(chunk)
+                file_hash = hasher.hexdigest()
+                cas_path = os.path.join(cas_dir, f"{file_hash}{ext}")
+
+                if os.path.exists(cas_path):
+                    os.remove(cas_tmp)
+                    cas_tmp = ""
+                    try:
+                        os.link(cas_path, target)
+                        logger.info(f"Hardlinked source video from CAS: {cas_path} -> {target}")
+                    except OSError as e:
+                        logger.warning(f"Hardlink failed ({e}), falling back to copy: {video_path} -> {target}")
+                        shutil.copy2(video_path, target)
+                else:
+                    os.replace(cas_tmp, cas_path)
+                    cas_tmp = ""
+                    try:
+                        os.link(cas_path, target)
+                        logger.info(f"Copied to CAS and hardlinked: {video_path} -> {target}")
+                    except OSError as e:
+                        logger.warning(f"CAS hardlink failed ({e}), falling back to copy: {video_path} -> {target}")
+                        if not os.path.exists(target):
+                            shutil.copy2(video_path, target)
+            except Exception:
+                if not os.path.exists(target):
+                    shutil.copy2(video_path, target)
+                    logger.info(f"Copied source video (CAS bypass): {video_path} -> {target}")
+                raise
+            finally:
+                if cas_tmp and os.path.exists(cas_tmp):
+                    try:
+                        os.remove(cas_tmp)
+                    except OSError:
+                        pass
     else:
         logger.info(f"Referencing source video in place: {video_path}")
 
