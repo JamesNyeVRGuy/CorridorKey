@@ -72,6 +72,8 @@ services:
   corridorkey-node:
     image: ghcr.io/jamesnyevrguy/corridorkey-node:nvidia
     restart: unless-stopped
+    labels:
+      - com.centurylinklabs.watchtower.enable=true
     deploy:
       resources:
         reservations:
@@ -89,6 +91,17 @@ services:
       - ck-weights-gvm:/app/gvm_core/weights
       - ck-weights-vm:/app/VideoMaMaInferenceModule/checkpoints
       - ck-compile-cache:/app/.cache/corridorkey
+
+  # Auto-updater — checks for new node images every hour
+  watchtower:
+    image: nickfedor/watchtower
+    restart: unless-stopped
+    environment:
+      - WATCHTOWER_LABEL_ENABLE=true
+      - WATCHTOWER_CLEANUP=true
+      - WATCHTOWER_POLL_INTERVAL=3600
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
 
 volumes:
   ck-weights:

@@ -78,11 +78,25 @@
 		if (!setupInfo) return '';
 		const token = generatedToken || '<paste token here>';
 		const name = generatedTokenLabel || 'my-node';
+		const watchtower = `
+  # Auto-updater — checks for new node images every hour
+  watchtower:
+    image: nickfedor/watchtower
+    restart: unless-stopped
+    environment:
+      - WATCHTOWER_LABEL_ENABLE=true
+      - WATCHTOWER_CLEANUP=true
+      - WATCHTOWER_POLL_INTERVAL=3600
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock`;
+
 		if (gpuVendor === 'nvidia') {
 			return `services:
   corridorkey-node:
     image: ${nodeImage}
     restart: unless-stopped
+    labels:
+      - com.centurylinklabs.watchtower.enable=true
     deploy:
       resources:
         reservations:
@@ -100,6 +114,7 @@
       - ck-weights-gvm:/app/gvm_core/weights
       - ck-weights-vm:/app/VideoMaMaInferenceModule/checkpoints
       - ck-compile-cache:/app/.cache/corridorkey
+${watchtower}
 
 volumes:
   ck-weights:
@@ -111,6 +126,8 @@ volumes:
   corridorkey-node:
     image: ${nodeImage}
     restart: unless-stopped
+    labels:
+      - com.centurylinklabs.watchtower.enable=true
     devices:
       - /dev/kfd
       - /dev/dri
@@ -128,6 +145,7 @@ volumes:
       - ck-weights-gvm:/app/gvm_core/weights
       - ck-weights-vm:/app/VideoMaMaInferenceModule/checkpoints
       - ck-compile-cache:/app/.cache/corridorkey
+${watchtower}
 
 volumes:
   ck-weights:

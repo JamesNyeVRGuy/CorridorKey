@@ -33,10 +33,63 @@
 	let userActivity = $state<any>(null);
 	let activityLoading = $state(false);
 
-	// Credit grant
+	// Credit grant (single user)
 	let grantHours = $state('');
 	let grantInProgress = $state(false);
 	let grantResult = $state<{ msg: string; ok: boolean } | null>(null);
+
+	// Bulk selection
+	let selectedUsers = $state<Set<string>>(new Set());
+	let bulkHours = $state('');
+	let bulkInProgress = $state(false);
+	let bulkResult = $state<{ msg: string; ok: boolean } | null>(null);
+
+	let hasSelection = $derived(selectedUsers.size > 0);
+
+	function toggleSelect(userId: string, e: Event) {
+		e.stopPropagation();
+		const next = new Set(selectedUsers);
+		if (next.has(userId)) next.delete(userId); else next.add(userId);
+		selectedUsers = next;
+	}
+
+	function toggleSelectAll() {
+		if (selectedUsers.size === filteredUsers.length) {
+			selectedUsers = new Set();
+		} else {
+			selectedUsers = new Set(filteredUsers.map(u => u.user_id));
+		}
+	}
+
+	function clearSelection() { selectedUsers = new Set(); bulkResult = null; }
+
+	async function bulkGrantCredits() {
+		const hours = parseFloat(bulkHours);
+		if (!hours || isNaN(hours)) { bulkResult = { msg: 'Enter a valid number of hours', ok: false }; return; }
+
+		const targets = filteredUsers.filter(u => selectedUsers.has(u.user_id) && u.orgs?.length);
+		if (!targets.length) { bulkResult = { msg: 'No selected users have orgs', ok: false }; return; }
+
+		bulkInProgress = true;
+		bulkResult = null;
+		let ok = 0;
+		let fail = 0;
+		for (const u of targets) {
+			try {
+				await adminFetch('/api/admin/credits/grant', {
+					method: 'POST', body: JSON.stringify({ org_id: u.orgs![0].org_id, hours })
+				});
+				ok++;
+			} catch { fail++; }
+		}
+		const sign = hours > 0 ? '+' : '';
+		bulkResult = {
+			msg: `${sign}${hours}h granted to ${ok} user${ok !== 1 ? 's' : ''}${fail ? `, ${fail} failed` : ''}`,
+			ok: fail === 0,
+		};
+		bulkHours = '';
+		bulkInProgress = false;
+	}
 
 	async function adminFetch(path: string, opts?: RequestInit) {
 		const token = localStorage.getItem('ck:auth_token');
@@ -228,13 +281,41 @@
 			<input type="checkbox" bind:checked={showRejected} />
 			Show rejected
 		</label>
+		<label class="toggle-label mono">
+			<input type="checkbox" checked={selectedUsers.size === filteredUsers.length && filteredUsers.length > 0} onchange={toggleSelectAll} />
+			Select all
+		</label>
 		<span class="filter-count mono">{filteredUsers.length} users</span>
 	</div>
+
+	{#if hasSelection}
+		<div class="bulk-bar">
+			<span class="bulk-count mono">{selectedUsers.size} selected</span>
+			<div class="bulk-grant">
+				<input
+					type="number"
+					step="0.5"
+					class="credit-input mono"
+					placeholder="hours"
+					bind:value={bulkHours}
+					onkeydown={(e) => { if (e.key === 'Enter') bulkGrantCredits(); }}
+				/>
+				<button class="btn-grant mono" onclick={bulkGrantCredits} disabled={bulkInProgress}>
+					{bulkInProgress ? '...' : 'GRANT TO ALL'}
+				</button>
+			</div>
+			{#if bulkResult}
+				<span class="grant-msg mono" class:grant-ok={bulkResult.ok} class:grant-err={!bulkResult.ok}>{bulkResult.msg}</span>
+			{/if}
+			<button class="btn-ghost mono bulk-clear" onclick={clearSelection}>Clear</button>
+		</div>
+	{/if}
 
 	<!-- User list -->
 	<div class="user-list">
 		{#each filteredUsers as u (u.user_id)}
-			<button class="user-row" onclick={() => toggleExpand(u.user_id)} class:expanded={expandedUser === u.user_id}>
+			<button class="user-row" onclick={() => toggleExpand(u.user_id)} class:expanded={expandedUser === u.user_id} class:selected={selectedUsers.has(u.user_id)}>
+				<input type="checkbox" class="row-check" checked={selectedUsers.has(u.user_id)} onclick={(e) => toggleSelect(u.user_id, e)} />
 				<span class="tier-dot" data-tier={u.tier}></span>
 				<span class="user-name">{displayName(u)}</span>
 				<span class="user-email mono">{u.email}</span>
@@ -405,6 +486,17 @@
 	.toggle-label input { accent-color: var(--accent); }
 	.filter-count { font-size: 10px; color: var(--text-tertiary); margin-left: auto; }
 
+	/* Bulk action bar */
+	.bulk-bar {
+		display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap;
+		padding: var(--sp-2) var(--sp-3);
+		background: rgba(255, 242, 3, 0.06); border: 1px solid rgba(255, 242, 3, 0.15);
+		border-radius: var(--radius-md);
+	}
+	.bulk-count { font-size: 11px; color: var(--accent); font-weight: 600; }
+	.bulk-grant { display: flex; align-items: center; gap: var(--sp-1); }
+	.bulk-clear { margin-left: auto; }
+
 	/* User list */
 	.user-list {
 		border: 1px solid var(--border); border-radius: var(--radius-md); overflow: hidden;
@@ -412,7 +504,7 @@
 	}
 
 	.user-row {
-		display: grid; grid-template-columns: 8px 1fr 1.5fr auto auto auto 20px;
+		display: grid; grid-template-columns: 18px 8px 1fr 1.5fr auto auto auto 20px;
 		gap: var(--sp-2); align-items: center; padding: var(--sp-2) var(--sp-3);
 		border-bottom: 1px solid var(--border-subtle); width: 100%; text-align: left;
 		font: inherit; color: inherit; background: transparent; border-left: none; border-right: none; border-top: none;
@@ -421,6 +513,8 @@
 	.user-row:hover { background: var(--surface-2); }
 	.user-row:last-child { border-bottom: none; }
 	.user-row.expanded { background: var(--surface-2); border-left: 3px solid var(--accent); }
+	.user-row.selected { background: rgba(255, 242, 3, 0.04); }
+	.row-check { accent-color: var(--accent); cursor: pointer; margin: 0; }
 
 	.tier-dot { width: 8px; height: 8px; border-radius: 50%; }
 	.tier-dot[data-tier="pending"] { background: var(--accent); }

@@ -14,7 +14,7 @@ Model weights are also downloaded on first launch.
 import sys
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_submodules
+from PyInstaller.utils.hooks import collect_submodules, copy_metadata
 
 block_cipher = None
 
@@ -29,6 +29,29 @@ _hidden = (
     + collect_submodules("h11")
     + collect_submodules("sniffio")
     + collect_submodules("certifi")
+)
+
+# Runtime metadata lookups: transformers/huggingface-hub/diffusers call
+# importlib.metadata.version(pkg) on several packages at import or first-use.
+# PyInstaller doesn't bundle .dist-info by default, so copy the metadata for
+# anything these libraries probe. `requests` is queried by transformers 5.x
+# even though it's no longer a declared dependency, which is what was
+# surfacing as "The 'requests' distribution was not found..." on nodes.
+_metadata = (
+    copy_metadata("transformers", recursive=True)
+    + copy_metadata("huggingface-hub", recursive=True)
+    + copy_metadata("diffusers", recursive=True)
+    + copy_metadata("accelerate")
+    + copy_metadata("peft")
+    + copy_metadata("timm")
+    + copy_metadata("tokenizers")
+    + copy_metadata("safetensors")
+    + copy_metadata("requests")
+    + copy_metadata("torch")
+    + copy_metadata("numpy")
+    + copy_metadata("tqdm")
+    + copy_metadata("packaging")
+    + copy_metadata("filelock")
 )
 
 # Collect HIP/ROCm DLLs that PyInstaller's binary analysis misses.
@@ -74,7 +97,8 @@ a = Analysis(
         ]
         if (ROOT / "web" / "node" / "_version.env").exists()
         else []
-    ),
+    )
+    + _metadata,
     hiddenimports=_hidden
     + [
         # Node agent modules (relative imports not always detected)

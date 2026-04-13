@@ -22,6 +22,11 @@ dependencies = [
     # There might still be issues though https://github.com/triton-lang/triton-windows?tab=readme-ov-file#windows-file-path-length-limit-260-causes-compilation-failure
     "triton-windows==3.4.0.post21 ; sys_platform == 'win32'",
     # GVM alpha hint generator
+    # Floors matter: the node binary is built with `pip install -e .` (not uv
+    # sync), so pip's resolver — not uv.lock — decides the installed versions.
+    # Transformers 5.x calls require_version("peft>=0.17.0") at runtime, so
+    # without a floor pip will happily resolve peft to 0.13.2 and the node
+    # will crash on first inference.
     "diffusers>=0.27",
     "transformers",
     "accelerate",
