@@ -141,6 +141,86 @@ def _delete_clip_full(clip_root: str) -> int:
     return freed
 
 
+def _sweep_cas_dir(cas_dir: str, org_id: str) -> tuple[int, int]:
+    """Sweep a per-org CAS directory for orphaned entries.
+
+    Uses a tombstone-based TTL: first sweep marks orphans (nlink==1) with a
+    ``.{name}.orphan`` file; subsequent sweeps reap entries whose tombstone
+    is older than 1 hour.
+
+    Returns:
+        (bytes_freed, files_removed)
+    """
+    freed_total = 0
+    removed = 0
+
+    for fname in os.listdir(cas_dir):
+        if fname.startswith("."):
+            continue
+        path = os.path.join(cas_dir, fname)
+        tombstone = os.path.join(cas_dir, f".{fname}.orphan")
+        try:
+            st = os.stat(path)
+            if st.st_nlink == 1:
+                if not os.path.exists(tombstone):
+                    with open(tombstone, "w") as f:
+                        f.write("")
+                    continue
+
+                tomb_mtime = os.stat(tombstone).st_mtime
+                if time.time() - tomb_mtime > 3600:
+                    # Atomic check-and-remove: hardlink to a probe path,
+                    # then re-check nlink. If a concurrent upload linked
+                    # onto the CAS entry between our stat and now, nlink
+                    # will be >2 and we abort instead of deleting live data.
+                    probe = path + f".{uuid.uuid4().hex}.probe"
+                    try:
+                        os.link(path, probe)
+                    except OSError:
+                        continue
+                    try:
+                        real_nlink = os.stat(probe).st_nlink
+                        if real_nlink == 2:
+                            freed = os.stat(probe).st_size
+                            os.remove(path)
+                            os.remove(tombstone)
+                            freed_total += freed
+                            removed += 1
+                            logger.info(f"Cleaned up CAS file: {fname} in org {org_id} ({freed} bytes)")
+                        else:
+                            logger.debug(f"CAS file {fname} re-linked (nlink={real_nlink}), skipping reap")
+                            if os.path.exists(tombstone):
+                                os.remove(tombstone)
+                    finally:
+                        try:
+                            os.remove(probe)
+                        except OSError:
+                            pass
+            else:
+                if os.path.exists(tombstone):
+                    os.remove(tombstone)
+        except FileNotFoundError:
+            if os.path.exists(tombstone):
+                try:
+                    os.remove(tombstone)
+                except OSError:
+                    pass
+        except Exception:
+            logger.warning(f"Failed to stat/remove CAS file {path}", exc_info=True)
+
+    # Clean up orphaned tombstones whose CAS files no longer exist
+    for fname in os.listdir(cas_dir):
+        if fname.startswith(".") and fname.endswith(".orphan"):
+            cas_name = fname[1 : -len(".orphan")]
+            if not os.path.exists(os.path.join(cas_dir, cas_name)):
+                try:
+                    os.remove(os.path.join(cas_dir, fname))
+                except OSError:
+                    pass
+
+    return freed_total, removed
+
+
 def cleanup_once(base_clips_dir: str) -> dict[str, list[str]]:
     """Scan all orgs and delete expired clips. Returns {org_id: [deleted_clip_names]}."""
     from backend.clip_state import scan_clips_dir
@@ -159,30 +239,16 @@ def cleanup_once(base_clips_dir: str) -> dict[str, list[str]]:
     total_freed = 0
     cas_removed = 0
 
-    cas_dir = os.path.join(base_clips_dir, ".cas")
-    if os.path.isdir(cas_dir):
-        for fname in os.listdir(cas_dir):
-            if fname.startswith("."):
-                continue
-            path = os.path.join(cas_dir, fname)
-            try:
-                st = os.stat(path)
-                if st.st_nlink == 1:
-                    if time.time() - st.st_ctime > 3600:
-                        freed = st.st_size
-                        os.remove(path)
-                        total_freed += freed
-                        cas_removed += 1
-                        logger.info(f"Cleaned up CAS file: {fname} ({freed} bytes)")
-            except FileNotFoundError:
-                pass
-            except Exception:
-                logger.warning(f"Failed to stat/remove CAS file {path}", exc_info=True)
-
     for org_id in os.listdir(base_clips_dir):
         org_dir = os.path.join(base_clips_dir, org_id)
         if not os.path.isdir(org_dir) or org_id.startswith("."):
             continue
+
+        cas_dir = os.path.join(org_dir, ".cas")
+        if os.path.isdir(cas_dir):
+            freed, removed = _sweep_cas_dir(cas_dir, org_id)
+            total_freed += freed
+            cas_removed += removed
 
         tier = _get_org_tier(org_id)
         max_days = policy.days_for_tier(tier)
@@ -231,7 +297,8 @@ def cleanup_once(base_clips_dir: str) -> dict[str, list[str]]:
             parts.append(f"{clip_count} clips")
         if cas_removed:
             parts.append(f"{cas_removed} CAS files")
-        logger.info(f"Cleanup cycle complete: freed {total_freed / 1e9:.2f}GB across {', '.join(parts)}")
+        summary = ", ".join(parts) if parts else "orphaned data"
+        logger.info(f"Cleanup cycle complete: freed {total_freed / 1e9:.2f}GB across {summary}")
 
     return result
 

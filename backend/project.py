@@ -222,6 +222,61 @@ def add_clips_to_project(
     return new_paths
 
 
+def _copy_via_cas(video_path: str, target: str, cas_dir: str) -> None:
+    """Copy a video into the CAS store and hardlink it to *target*.
+
+    If the file's SHA-256 already exists in *cas_dir*, the existing entry is
+    reused (dedup).  Falls back to a plain ``shutil.copy2`` when hardlinks
+    are not supported.
+    """
+    os.makedirs(cas_dir, exist_ok=True)
+    raw_ext = os.path.splitext(os.path.basename(video_path))[1].lower()
+    ext = raw_ext if raw_ext in _VIDEO_EXTS else ""
+
+    cas_tmp = os.path.join(cas_dir, f".{uuid.uuid4().hex}{ext}.tmp")
+    try:
+        hasher = hashlib.sha256()
+        with open(video_path, "rb") as src, open(cas_tmp, "wb") as dst:
+            while chunk := src.read(8 * 1024 * 1024):
+                hasher.update(chunk)
+                dst.write(chunk)
+        file_hash = hasher.hexdigest()
+        cas_path = os.path.join(cas_dir, f"{file_hash}{ext}")
+
+        if os.path.exists(cas_path):
+            os.remove(cas_tmp)
+            cas_tmp = ""
+            try:
+                os.link(cas_path, target)
+                logger.info(f"Hardlinked source video from CAS: {cas_path} -> {target}")
+            except OSError as e:
+                logger.warning(f"Hardlink failed ({e}), falling back to copy: {video_path} -> {target}")
+                shutil.copy2(video_path, target)
+        else:
+            os.replace(cas_tmp, cas_path)
+            cas_tmp = ""
+            try:
+                os.link(cas_path, target)
+                logger.info(f"Copied to CAS and hardlinked: {video_path} -> {target}")
+            except OSError as e:
+                logger.warning(f"CAS hardlink failed ({e}), falling back to copy: {video_path} -> {target}")
+                if not os.path.exists(target):
+                    shutil.copy2(video_path, target)
+    except Exception:
+        if not os.path.exists(target):
+            shutil.copy2(video_path, target)
+        if os.path.exists(target):
+            logger.warning(f"CAS failed but fallback copy succeeded: {video_path} -> {target}")
+        else:
+            raise
+    finally:
+        if cas_tmp and os.path.exists(cas_tmp):
+            try:
+                os.remove(cas_tmp)
+            except OSError:
+                pass
+
+
 def _create_clip_folder(
     clips_dir: str,
     video_path: str,
@@ -247,49 +302,7 @@ def _create_clip_folder(
         if not os.path.isfile(target):
             base_dir = cas_root or projects_root()
             cas_dir = os.path.join(base_dir, ".cas")
-            os.makedirs(cas_dir, exist_ok=True)
-            ext = os.path.splitext(filename)[1][:20].lower()
-
-            cas_tmp = os.path.join(cas_dir, f".{uuid.uuid4().hex}{ext}.tmp")
-            try:
-                hasher = hashlib.sha256()
-                with open(video_path, "rb") as src, open(cas_tmp, "wb") as dst:
-                    while chunk := src.read(8 * 1024 * 1024):
-                        hasher.update(chunk)
-                        dst.write(chunk)
-                file_hash = hasher.hexdigest()
-                cas_path = os.path.join(cas_dir, f"{file_hash}{ext}")
-
-                if os.path.exists(cas_path):
-                    os.remove(cas_tmp)
-                    cas_tmp = ""
-                    try:
-                        os.link(cas_path, target)
-                        logger.info(f"Hardlinked source video from CAS: {cas_path} -> {target}")
-                    except OSError as e:
-                        logger.warning(f"Hardlink failed ({e}), falling back to copy: {video_path} -> {target}")
-                        shutil.copy2(video_path, target)
-                else:
-                    os.replace(cas_tmp, cas_path)
-                    cas_tmp = ""
-                    try:
-                        os.link(cas_path, target)
-                        logger.info(f"Copied to CAS and hardlinked: {video_path} -> {target}")
-                    except OSError as e:
-                        logger.warning(f"CAS hardlink failed ({e}), falling back to copy: {video_path} -> {target}")
-                        if not os.path.exists(target):
-                            shutil.copy2(video_path, target)
-            except Exception:
-                if not os.path.exists(target):
-                    shutil.copy2(video_path, target)
-                    logger.info(f"Copied source video (CAS bypass): {video_path} -> {target}")
-                raise
-            finally:
-                if cas_tmp and os.path.exists(cas_tmp):
-                    try:
-                        os.remove(cas_tmp)
-                    except OSError:
-                        pass
+            _copy_via_cas(video_path, target, cas_dir)
     else:
         logger.info(f"Referencing source video in place: {video_path}")
 
