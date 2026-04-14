@@ -448,10 +448,10 @@ def check_gpu_available(gpu_index: int = 0, min_free_gb: float = 0.0) -> tuple[b
         if "[N/A]" in str(e):
             logger.debug("bad nvidia-smi output, continuing to fallbacks")
         else:
-            logger.debug("Unexpected ValueError trying to enumerate GPUs", exc_info=True)
+            logger.debug("Unexpected ValueError trying to check GPU usage", exc_info=True)
     # Catch all exceptions and log but continue to fallbacks
     except Exception:
-        logger.debug("Unexpected failure trying to enumerate GPUs", exc_info=True)
+        logger.debug("Unexpected failure trying to check GPU usage", exc_info=True)
 
     # Try AMD
     try:
@@ -473,22 +473,23 @@ def check_gpu_available(gpu_index: int = 0, min_free_gb: float = 0.0) -> tuple[b
         pass
 
     # Try PyTorch
-    try:
-        # Set the device to query
-        device = torch.device(f"cuda:{gpu_index}")
+    if torch.cuda.is_available():
+        try:
+            # Set the device to query
+            device = torch.device(f"cuda:{gpu_index}")
 
-        # mem_get_info returns (free_bytes, total_bytes)
-        free_bytes, _ = torch.cuda.mem_get_info(device)
-        free_gb = free_bytes / (1024**3)
+            # mem_get_info returns (free_bytes, total_bytes)
+            free_bytes, _ = torch.cuda.mem_get_info(device)
+            free_gb = free_bytes / (1024**3)
 
-        # No utility check so fallback relies on just vram usage
-        if min_free_gb > 0 and free_gb < min_free_gb:
-            return False, f"GPU {gpu_index} low VRAM (PyTorch: {free_gb:.1f}GB free)"
+            # No utility check so fallback relies on just vram usage
+            if min_free_gb > 0 and free_gb < min_free_gb:
+                return False, f"GPU {gpu_index} low VRAM (PyTorch: {free_gb:.1f}GB free)"
 
-        return True, "ok"
-    # Catch all so we return default
-    except Exception:
-        pass
+            return True, "ok"
+        # Catch all so we return default
+        except Exception:
+            pass
 
     return True, "gpu monitoring unavailable"
 

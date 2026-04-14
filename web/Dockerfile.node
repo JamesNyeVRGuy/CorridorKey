@@ -14,13 +14,13 @@
 
 ARG GPU_VENDOR=nvidia
 # Only consumed by the nvidia-container stage; ignored for other vendors.
-ARG PYTORCH_CONTAINER_VERSION=26.03
+ARG NVIDIA_PYTORCH_CONTAINER_VERSION=26.03
 
 # NVIDIA / AMD
 FROM ghcr.io/astral-sh/uv:0.7-python3.11-bookworm-slim AS base-nvidia
 FROM ghcr.io/astral-sh/uv:0.7-python3.11-bookworm-slim AS base-amd
 # NVIDIA NGC Container
-FROM nvcr.io/nvidia/pytorch:${PYTORCH_CONTAINER_VERSION}-py3 AS base-nvidia-container
+FROM nvcr.io/nvidia/pytorch:${NVIDIA_PYTORCH_CONTAINER_VERSION}-py3 AS base-nvidia-container
 # Inject uv to manage the dependency graph in this runtime
 COPY --from=ghcr.io/astral-sh/uv:0.7 /uv /usr/local/bin/uv
 
@@ -31,8 +31,13 @@ ARG GPU_VENDOR
 WORKDIR /app
 
 # Create non-root user
-# Let system pick UID so it doesn't collide with base images
-RUN useradd --create-home nodeuser
+RUN if [ "$GPU_VENDOR" = "nvidia-container" ]; then \
+        # Let system pick UID to avoid collision with user created in base NGC container
+        useradd --create-home nodeuser; \
+    else \
+        # Use UID 1000 normally
+        RUN useradd --create-home --uid 1000 nodeuser; \
+    fi
 
 # Runtime deps for OpenCV and video I/O
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
@@ -54,9 +59,10 @@ RUN --mount=type=cache,target=/root/.cache/uv \
         uv pip install torch==2.8.0 torchvision==0.23.0 --index-url https://download.pytorch.org/whl/rocm6.3 && \
         uv pip install pyrsmi; \
     elif [ "$GPU_VENDOR" = "nvidia-container" ]; then \
-        # Creates venv with system package access, then installs project dependencies and reconciles environment with uv dependency graph ignoring torch and torchvision
+        # Creates venv with system package access
+        # Installs project dependencies and reconciles environment with uv dependency graph ignoring torch and torchvision
         uv venv --python "$(python3 -c 'import sys; print(sys.executable)')" --system-site-packages .venv && \
-        uv sync --no-dev --no-install-project --no-install-package torch --no-install-package torchvision; \
+        uv sync --frozen --no-dev --no-install-project --no-install-package torch --no-install-package torchvision; \
     else \
         uv sync --frozen --no-dev --extra cuda --no-install-project; \
     fi
