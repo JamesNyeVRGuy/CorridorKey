@@ -244,6 +244,10 @@ class PostgresBackend(StorageBackend):
                                 node_id TEXT PRIMARY KEY,
                                 config JSONB NOT NULL DEFAULT '{}'::jsonb,
                                 updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW());
+                            CREATE TABLE IF NOT EXISTS ck.clip_retention_policy (
+                                id TEXT PRIMARY KEY,
+                                policy JSONB NOT NULL DEFAULT '{}'::jsonb,
+                                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW());
                         """)
                         logger.info("Created ck schema and tables")
                     except Exception as schema_err:

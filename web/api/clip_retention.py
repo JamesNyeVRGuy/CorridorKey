@@ -51,23 +51,68 @@ class RetentionPolicy:
         return self.retention_days.get(tier, self.retention_days.get("member", 30))
 
 
+def _policy_from_dict(raw: dict) -> RetentionPolicy:
+    return RetentionPolicy(
+        enabled=raw.get("enabled", True),
+        retention_days=raw.get("retention_days", dict(_DEFAULT_RETENTION)),
+        delete_mode=raw.get("delete_mode", "outputs_only"),
+        check_interval=raw.get("check_interval", 3600),
+    )
+
+
 def get_retention_policy() -> RetentionPolicy:
-    """Load the retention policy from settings, or return defaults."""
+    """Load the retention policy from the DB, or return defaults."""
+    import json
+
+    from .database import get_pg_conn
+
+    with get_pg_conn() as conn:
+        if conn is not None:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT policy FROM ck.clip_retention_policy WHERE id = 'default'"
+            )
+            row = cur.fetchone()
+            cur.close()
+            if row and isinstance(row[0], dict):
+                return _policy_from_dict(row[0])
+            if row and isinstance(row[0], str):
+                try:
+                    return _policy_from_dict(json.loads(row[0]))
+                except ValueError:
+                    pass
+            return RetentionPolicy()
+
     from .database import get_storage
 
     raw = get_storage().get_setting(_SETTINGS_KEY)
     if raw and isinstance(raw, dict):
-        return RetentionPolicy(
-            enabled=raw.get("enabled", True),
-            retention_days=raw.get("retention_days", dict(_DEFAULT_RETENTION)),
-            delete_mode=raw.get("delete_mode", "outputs_only"),
-            check_interval=raw.get("check_interval", 3600),
-        )
+        return _policy_from_dict(raw)
     return RetentionPolicy()
 
 
 def set_retention_policy(policy: RetentionPolicy) -> None:
-    """Save the retention policy to settings."""
+    """Save the retention policy. Atomic UPSERT on the singleton row."""
+    import json
+
+    from .database import get_pg_conn
+
+    payload = json.dumps(asdict(policy))
+
+    with get_pg_conn() as conn:
+        if conn is not None:
+            cur = conn.cursor()
+            cur.execute(
+                """INSERT INTO ck.clip_retention_policy (id, policy, updated_at)
+                   VALUES ('default', %s::jsonb, NOW())
+                   ON CONFLICT (id) DO UPDATE SET
+                       policy = EXCLUDED.policy,
+                       updated_at = NOW()""",
+                (payload,),
+            )
+            cur.close()
+            return
+
     from .database import get_storage
 
     get_storage().set_setting(_SETTINGS_KEY, asdict(policy))
