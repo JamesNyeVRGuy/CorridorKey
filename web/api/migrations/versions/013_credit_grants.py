@@ -35,10 +35,7 @@ def upgrade() -> None:
             PRIMARY KEY (org_id, grant_type, period)
         )
     """)
-    op.execute(
-        "CREATE INDEX IF NOT EXISTS idx_ck_credit_grants_period "
-        "ON ck.credit_grants (grant_type, period)"
-    )
+    op.execute("CREATE INDEX IF NOT EXISTS idx_ck_credit_grants_period ON ck.credit_grants (grant_type, period)")
     op.execute("""
         DO $$ BEGIN
             IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'postgres') THEN
