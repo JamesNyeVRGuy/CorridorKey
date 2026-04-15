@@ -222,6 +222,16 @@ class PostgresBackend(StorageBackend):
                                 total_heartbeats BIGINT NOT NULL DEFAULT 0,
                                 security_warnings INTEGER NOT NULL DEFAULT 0,
                                 last_updated DOUBLE PRECISION NOT NULL DEFAULT 0);
+                            CREATE TABLE IF NOT EXISTS ck.webhooks (
+                                id TEXT PRIMARY KEY,
+                                org_id TEXT NOT NULL,
+                                url TEXT NOT NULL,
+                                events JSONB NOT NULL DEFAULT '[]'::jsonb,
+                                format TEXT NOT NULL DEFAULT 'json',
+                                active BOOLEAN NOT NULL DEFAULT TRUE,
+                                created_by TEXT NOT NULL DEFAULT '',
+                                created_at DOUBLE PRECISION NOT NULL DEFAULT 0);
+                            CREATE INDEX IF NOT EXISTS idx_ck_webhooks_org ON ck.webhooks (org_id);
                         """)
                         logger.info("Created ck schema and tables")
                     except Exception as schema_err:

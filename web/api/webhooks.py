@@ -46,6 +46,22 @@ class Webhook:
         }
 
 
+_WEBHOOK_COLS = "id, org_id, url, events, format, active, created_by, created_at"
+
+
+def _row_to_webhook(row: tuple) -> Webhook:
+    return Webhook(
+        id=row[0],
+        org_id=row[1],
+        url=row[2],
+        events=list(row[3] or []),
+        format=row[4] or "json",
+        active=bool(row[5]),
+        created_by=row[6] or "",
+        created_at=float(row[7] or 0),
+    )
+
+
 def _load_webhooks() -> dict[str, dict]:
     from .database import get_storage
 
@@ -111,6 +127,8 @@ def create_webhook(org_id: str, url: str, events: list[str], fmt: str, created_b
     """Create a new webhook for an org."""
     import secrets
 
+    from .database import get_pg_conn
+
     _validate_webhook_url(url)
     hook_id = secrets.token_hex(8)
     hook = Webhook(
@@ -122,6 +140,26 @@ def create_webhook(org_id: str, url: str, events: list[str], fmt: str, created_b
         created_by=created_by,
         created_at=time.time(),
     )
+
+    with get_pg_conn() as conn:
+        if conn is not None:
+            cur = conn.cursor()
+            cur.execute(
+                f"""INSERT INTO ck.webhooks ({_WEBHOOK_COLS})
+                    VALUES (%s, %s, %s, %s::jsonb, %s, TRUE, %s, %s)""",
+                (
+                    hook.id,
+                    hook.org_id,
+                    hook.url,
+                    json.dumps(hook.events),
+                    hook.format,
+                    hook.created_by,
+                    hook.created_at,
+                ),
+            )
+            cur.close()
+            return hook
+
     hooks = _load_webhooks()
     hooks[hook_id] = hook.to_dict()
     _save_webhooks(hooks)
@@ -130,12 +168,35 @@ def create_webhook(org_id: str, url: str, events: list[str], fmt: str, created_b
 
 def list_webhooks(org_id: str) -> list[Webhook]:
     """List webhooks for an org."""
+    from .database import get_pg_conn
+
+    with get_pg_conn() as conn:
+        if conn is not None:
+            cur = conn.cursor()
+            cur.execute(
+                f"SELECT {_WEBHOOK_COLS} FROM ck.webhooks WHERE org_id = %s",
+                (org_id,),
+            )
+            rows = cur.fetchall()
+            cur.close()
+            return [_row_to_webhook(r) for r in rows]
+
     hooks = _load_webhooks()
     return [Webhook(**v) for v in hooks.values() if v.get("org_id") == org_id]
 
 
 def delete_webhook(hook_id: str) -> bool:
     """Delete a webhook."""
+    from .database import get_pg_conn
+
+    with get_pg_conn() as conn:
+        if conn is not None:
+            cur = conn.cursor()
+            cur.execute("DELETE FROM ck.webhooks WHERE id = %s", (hook_id,))
+            removed = cur.rowcount > 0
+            cur.close()
+            return removed
+
     hooks = _load_webhooks()
     if hook_id not in hooks:
         return False
@@ -146,12 +207,28 @@ def delete_webhook(hook_id: str) -> bool:
 
 def fire_event(event: str, org_id: str, data: dict[str, Any]) -> None:
     """Fire a webhook event for an org. Non-blocking — runs in a thread."""
-    hooks = _load_webhooks()
-    matching = [
-        Webhook(**v)
-        for v in hooks.values()
-        if v.get("org_id") == org_id and v.get("active") and event in v.get("events", [])
-    ]
+    from .database import get_pg_conn
+
+    matching: list[Webhook] = []
+    with get_pg_conn() as conn:
+        if conn is not None:
+            cur = conn.cursor()
+            cur.execute(
+                f"""SELECT {_WEBHOOK_COLS} FROM ck.webhooks
+                    WHERE org_id = %s AND active = TRUE AND events @> %s::jsonb""",
+                (org_id, json.dumps([event])),
+            )
+            rows = cur.fetchall()
+            cur.close()
+            matching = [_row_to_webhook(r) for r in rows]
+        else:
+            hooks = _load_webhooks()
+            matching = [
+                Webhook(**v)
+                for v in hooks.values()
+                if v.get("org_id") == org_id and v.get("active") and event in v.get("events", [])
+            ]
+
     if not matching:
         return
 
