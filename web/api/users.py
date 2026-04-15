@@ -216,11 +216,34 @@ class UserStore:
                         ),
                     )
 
-                # Drop orphan rows inserted by the previous migration that
-                # were keyed by email instead of UUID. Their data has
-                # already been merged into the corresponding UUID row
-                # above via blob_by_email lookup.
-                cur.execute("DELETE FROM ck.users WHERE user_id LIKE '%@%'")
+                # Drop orphan rows: any ck.users row whose user_id is not
+                # a live auth.users id is stale. This catches:
+                #   - email-keyed rows from the pre-CRKY-61 migration pass
+                #     (user_id='foo@example.com')
+                #   - rows pointing at a UUID that was deleted and re-issued
+                #     in Supabase (account delete + re-signup, manual
+                #     cleanup, Supabase rebuild), which leaves the old
+                #     UUID row behind with its last-known tier
+                # Both surface the same symptom: the same person appears
+                # twice in the admin users list, once live and once stale,
+                # and approving the stale row 400s with "User is already
+                # member, not pending".
+                #
+                # Guard against running with an empty auth.users (which
+                # would wipe every user). The auth.users query above
+                # returned rows into the migration loop, so auth_count
+                # should be > 0 here, but double-check to stay safe.
+                cur.execute("SELECT COUNT(*) FROM auth.users WHERE email IS NOT NULL")
+                auth_count = (cur.fetchone() or (0,))[0]
+                if auth_count > 0:
+                    cur.execute("""
+                        DELETE FROM ck.users
+                        WHERE user_id NOT IN (
+                            SELECT id::text FROM auth.users WHERE email IS NOT NULL
+                        )
+                    """)
+                    if cur.rowcount:
+                        logger.info(f"Removed {cur.rowcount} orphan ck.users rows with no matching auth.users id")
 
                 # Recover users whose tier was lost from both the blob
                 # and auth.users. If they own a personal org, they were

@@ -175,20 +175,36 @@
 	let pageStart = $derived(total === 0 ? 0 : (page - 1) * pageSize + 1);
 	let pageEnd = $derived(Math.min(page * pageSize, total));
 
+	let actionError = $state<string | null>(null);
+
 	async function approveUser(userId: string) {
 		actionInProgress = userId;
+		actionError = null;
 		try {
 			await adminFetch(`/api/admin/users/${encodeURIComponent(userId)}/approve`, { method: 'POST' });
-			await loadUsers();
-		} finally { actionInProgress = null; }
+		} catch (e) {
+			// Most common: 400 "User is already member, not pending" from
+			// clicking a stale row after someone else approved them first.
+			// Don't throw an uncaught promise rejection — show the error
+			// and refresh so the list drops the stale row.
+			actionError = e instanceof Error ? e.message : String(e);
+		} finally {
+			actionInProgress = null;
+		}
+		try { await loadUsers(); } catch { /* ignore reload failures */ }
 	}
 
 	async function rejectUser(userId: string) {
 		actionInProgress = userId;
+		actionError = null;
 		try {
 			await adminFetch(`/api/admin/users/${encodeURIComponent(userId)}/reject`, { method: 'POST' });
-			await loadUsers();
-		} finally { actionInProgress = null; }
+		} catch (e) {
+			actionError = e instanceof Error ? e.message : String(e);
+		} finally {
+			actionInProgress = null;
+		}
+		try { await loadUsers(); } catch { /* ignore reload failures */ }
 	}
 
 	async function setTier(userId: string, tier: string) {
@@ -270,6 +286,13 @@
 {#if loading}
 	<div class="loading mono">Loading users...</div>
 {:else}
+	{#if actionError}
+		<div class="action-error mono" role="alert">
+			<span>{actionError}</span>
+			<button class="action-error-close" onclick={() => (actionError = null)} aria-label="Dismiss">×</button>
+		</div>
+	{/if}
+
 	<!-- Pending filter chip -->
 	{#if pendingTotal > 0}
 		<button
@@ -494,6 +517,18 @@
 
 <style>
 	.loading { text-align: center; padding: var(--sp-8); color: var(--text-tertiary); font-size: 12px; }
+
+	/* Action error banner */
+	.action-error {
+		display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2);
+		padding: 8px 12px; font-size: 11px; color: var(--state-error);
+		background: rgba(255, 82, 82, 0.08); border: 1px solid rgba(255, 82, 82, 0.25);
+		border-radius: var(--radius-sm);
+	}
+	.action-error-close {
+		background: transparent; border: none; color: var(--state-error);
+		font-size: 16px; cursor: pointer; padding: 0 4px;
+	}
 
 	/* Pending filter chip */
 	.pending-chip {
