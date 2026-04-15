@@ -36,27 +36,72 @@ def _get_admin(request: Request) -> UserContext:
 # --- User management ---
 
 
+_DEFAULT_USER_LIMIT = 50
+_MAX_USER_LIMIT = 200
+
+
+def _clamp_limit(limit: int | None) -> int:
+    if limit is None or limit <= 0:
+        return _DEFAULT_USER_LIMIT
+    return min(int(limit), _MAX_USER_LIMIT)
+
+
 @router.get("/users")
-def list_users(tier: str | None = None):
-    """List all users, optionally filtered by tier. Includes org memberships."""
+def list_users(
+    tier: str | None = None,
+    q: str | None = None,
+    limit: int = _DEFAULT_USER_LIMIT,
+    offset: int = 0,
+):
+    """List users with server-side filter, search, and pagination.
+
+    Query params:
+        tier   - filter by tier (pending, member, contributor, org_admin,
+                 platform_admin). Omit for all non-pending users.
+        q      - case-insensitive substring match against email, name, company.
+        limit  - page size (default 50, max 200).
+        offset - page offset (default 0).
+
+    Returns {users, total, limit, offset}. ``total`` is the full count of
+    matching rows, not the length of ``users``.
+    """
+    limit = _clamp_limit(limit)
+    offset = max(0, int(offset or 0))
+
     store = get_user_store()
     org_store = get_org_store()
-    users = store.list_users(tier_filter=tier)
+
+    total = store.count_users(tier_filter=tier, q=q)
+    users = store.list_users(tier_filter=tier, q=q, limit=limit, offset=offset)
+
     enriched = []
     for u in users:
         data = u.to_dict()
         user_orgs = org_store.list_user_orgs(u.user_id)
         data["orgs"] = [{"org_id": o.org_id, "name": o.name} for o in user_orgs]
         enriched.append(data)
-    return {"users": enriched}
+    return {"users": enriched, "total": total, "limit": limit, "offset": offset}
 
 
 @router.get("/users/pending")
-def list_pending_users():
-    """List users awaiting approval."""
+def list_pending_users(
+    q: str | None = None,
+    limit: int = _DEFAULT_USER_LIMIT,
+    offset: int = 0,
+):
+    """List users awaiting approval, paginated."""
+    limit = _clamp_limit(limit)
+    offset = max(0, int(offset or 0))
+
     store = get_user_store()
-    pending = store.list_users(tier_filter="pending")
-    return {"users": [u.to_dict() for u in pending]}
+    total = store.count_users(tier_filter="pending", q=q)
+    pending = store.list_users(tier_filter="pending", q=q, limit=limit, offset=offset)
+    return {
+        "users": [u.to_dict() for u in pending],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
 
 
 @router.post("/users/{user_id}/approve")

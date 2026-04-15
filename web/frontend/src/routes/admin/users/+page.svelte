@@ -15,7 +15,8 @@
 		orgs?: { org_id: string; name: string }[];
 	}
 
-	const TIERS = ['pending', 'member', 'contributor', 'org_admin', 'platform_admin'];
+	const TIERS = ['pending', 'member', 'contributor', 'org_admin', 'platform_admin', 'rejected'];
+	const PAGE_SIZES = [25, 50, 100, 200];
 
 	let users = $state<UserRecord[]>([]);
 	let pendingUsers = $state<UserRecord[]>([]);
@@ -26,7 +27,14 @@
 	let inviteUrl = $state('');
 	let inviteError = $state('');
 	let inviteGenerating = $state(false);
-	let showRejected = $state(false);
+
+	// Server-side pagination state
+	let page = $state(1);
+	let pageSize = $state(50);
+	let total = $state(0);
+	let pendingTotal = $state(0);
+	let listLoading = $state(false);
+	let searchDebounce: ReturnType<typeof setTimeout> | null = null;
 
 	// Expandable user detail
 	let expandedUser = $state<string | null>(null);
@@ -54,10 +62,11 @@
 	}
 
 	function toggleSelectAll() {
-		if (selectedUsers.size === filteredUsers.length) {
+		// Operates on the currently visible page, not the full result set.
+		if (selectedUsers.size === users.length && users.length > 0) {
 			selectedUsers = new Set();
 		} else {
-			selectedUsers = new Set(filteredUsers.map(u => u.user_id));
+			selectedUsers = new Set(users.map(u => u.user_id));
 		}
 	}
 
@@ -67,7 +76,7 @@
 		const hours = parseFloat(bulkHours);
 		if (!hours || isNaN(hours)) { bulkResult = { msg: 'Enter a valid number of hours', ok: false }; return; }
 
-		const targets = filteredUsers.filter(u => selectedUsers.has(u.user_id) && u.orgs?.length);
+		const targets = users.filter(u => selectedUsers.has(u.user_id) && u.orgs?.length);
 		if (!targets.length) { bulkResult = { msg: 'No selected users have orgs', ok: false }; return; }
 
 		bulkInProgress = true;
@@ -100,14 +109,56 @@
 		return res.json();
 	}
 
-	async function loadUsers() {
-		const [allRes, pendingRes] = await Promise.all([
-			adminFetch('/api/admin/users'),
-			adminFetch('/api/admin/users/pending')
-		]);
-		users = allRes.users;
-		pendingUsers = pendingRes.users;
+	function buildUsersQuery(): string {
+		const params = new URLSearchParams();
+		params.set('limit', String(pageSize));
+		params.set('offset', String((page - 1) * pageSize));
+		if (tierFilter !== 'all') params.set('tier', tierFilter);
+		if (searchQuery.trim()) params.set('q', searchQuery.trim());
+		return params.toString();
 	}
+
+	async function loadUsers() {
+		listLoading = true;
+		try {
+			const [allRes, pendingRes] = await Promise.all([
+				adminFetch(`/api/admin/users?${buildUsersQuery()}`),
+				adminFetch('/api/admin/users/pending?limit=200'),
+			]);
+			users = allRes.users;
+			total = allRes.total ?? allRes.users.length;
+			pendingUsers = pendingRes.users;
+			pendingTotal = pendingRes.total ?? pendingRes.users.length;
+		} finally {
+			listLoading = false;
+		}
+	}
+
+	function goToPage(p: number) {
+		const maxPage = Math.max(1, Math.ceil(total / pageSize));
+		page = Math.min(Math.max(1, p), maxPage);
+		selectedUsers = new Set();
+		loadUsers().catch(() => {});
+	}
+
+	function onFiltersChanged() {
+		page = 1;
+		selectedUsers = new Set();
+		loadUsers().catch(() => {});
+	}
+
+	function onSearchInput() {
+		if (searchDebounce) clearTimeout(searchDebounce);
+		searchDebounce = setTimeout(() => {
+			page = 1;
+			selectedUsers = new Set();
+			loadUsers().catch(() => {});
+		}, 300);
+	}
+
+	let totalPages = $derived(Math.max(1, Math.ceil(total / pageSize)));
+	let pageStart = $derived(total === 0 ? 0 : (page - 1) * pageSize + 1);
+	let pageEnd = $derived(Math.min(page * pageSize, total));
 
 	async function approveUser(userId: string) {
 		actionInProgress = userId;
@@ -191,21 +242,6 @@
 		return `${Math.floor(seconds / 86400)}d ago`;
 	}
 
-	let filteredUsers = $derived.by(() => {
-		let list = users.filter(u => u.tier !== 'pending');
-		if (!showRejected) list = list.filter(u => u.tier !== 'rejected');
-		if (tierFilter !== 'all') list = list.filter(u => u.tier === tierFilter);
-		if (searchQuery) {
-			const q = searchQuery.toLowerCase();
-			list = list.filter(u =>
-				u.email.toLowerCase().includes(q) ||
-				(u.name && u.name.toLowerCase().includes(q)) ||
-				(u.company && u.company.toLowerCase().includes(q))
-			);
-		}
-		return list;
-	});
-
 	onMount(async () => {
 		try { await loadUsers(); } catch { /* ignore */ }
 		finally { loading = false; }
@@ -223,7 +259,7 @@
 	{#if pendingUsers.length > 0}
 		<div class="pending-section">
 			<div class="pending-header">
-				<h2 class="section-title mono">PENDING APPROVAL <span class="count-badge">{pendingUsers.length}</span></h2>
+				<h2 class="section-title mono">PENDING APPROVAL <span class="count-badge">{pendingTotal}</span></h2>
 			</div>
 			<div class="pending-grid">
 				{#each pendingUsers as pu (pu.user_id)}
@@ -270,22 +306,26 @@
 
 	<!-- Filter bar -->
 	<div class="filter-bar">
-		<input type="text" class="filter-search mono" placeholder="Search name, email, company..." bind:value={searchQuery} />
-		<select class="filter-select mono" bind:value={tierFilter}>
+		<input
+			type="text"
+			class="filter-search mono"
+			placeholder="Search name, email, company..."
+			bind:value={searchQuery}
+			oninput={onSearchInput}
+		/>
+		<select class="filter-select mono" bind:value={tierFilter} onchange={onFiltersChanged}>
 			<option value="all">All tiers</option>
 			{#each TIERS.filter(t => t !== 'pending') as t}
 				<option value={t}>{t}</option>
 			{/each}
 		</select>
 		<label class="toggle-label mono">
-			<input type="checkbox" bind:checked={showRejected} />
-			Show rejected
+			<input type="checkbox" checked={selectedUsers.size === users.length && users.length > 0} onchange={toggleSelectAll} />
+			Select page
 		</label>
-		<label class="toggle-label mono">
-			<input type="checkbox" checked={selectedUsers.size === filteredUsers.length && filteredUsers.length > 0} onchange={toggleSelectAll} />
-			Select all
-		</label>
-		<span class="filter-count mono">{filteredUsers.length} users</span>
+		<span class="filter-count mono">
+			{#if listLoading}loading…{:else if total === 0}0 users{:else}{pageStart}–{pageEnd} of {total}{/if}
+		</span>
 	</div>
 
 	{#if hasSelection}
@@ -313,7 +353,7 @@
 
 	<!-- User list -->
 	<div class="user-list">
-		{#each filteredUsers as u (u.user_id)}
+		{#each users as u (u.user_id)}
 			<button class="user-row" onclick={() => toggleExpand(u.user_id)} class:expanded={expandedUser === u.user_id} class:selected={selectedUsers.has(u.user_id)}>
 				<input type="checkbox" class="row-check" checked={selectedUsers.has(u.user_id)} onclick={(e) => toggleSelect(u.user_id, e)} />
 				<span class="tier-dot" data-tier={u.tier}></span>
@@ -396,6 +436,28 @@
 				</div>
 			{/if}
 		{/each}
+		{#if !listLoading && users.length === 0}
+			<div class="empty-row mono">No users match the current filters.</div>
+		{/if}
+	</div>
+
+	<!-- Pagination controls -->
+	<div class="pagination-bar">
+		<label class="toggle-label mono">
+			Rows
+			<select class="filter-select mono" bind:value={pageSize} onchange={onFiltersChanged}>
+				{#each PAGE_SIZES as n}
+					<option value={n}>{n}</option>
+				{/each}
+			</select>
+		</label>
+		<div class="pagination-controls">
+			<button class="btn-ghost mono" onclick={() => goToPage(1)} disabled={page <= 1 || listLoading}>« First</button>
+			<button class="btn-ghost mono" onclick={() => goToPage(page - 1)} disabled={page <= 1 || listLoading}>‹ Prev</button>
+			<span class="pagination-status mono">Page {page} / {totalPages}</span>
+			<button class="btn-ghost mono" onclick={() => goToPage(page + 1)} disabled={page >= totalPages || listLoading}>Next ›</button>
+			<button class="btn-ghost mono" onclick={() => goToPage(totalPages)} disabled={page >= totalPages || listLoading}>Last »</button>
+		</div>
 	</div>
 {/if}
 
@@ -576,4 +638,13 @@
 	.grant-msg { font-size: 10px; }
 	.grant-ok { color: var(--state-complete); }
 	.grant-err { color: var(--state-error); }
+
+	/* Pagination */
+	.pagination-bar {
+		display: flex; align-items: center; justify-content: space-between;
+		gap: var(--sp-3); padding: var(--sp-2) var(--sp-1); flex-wrap: wrap;
+	}
+	.pagination-controls { display: flex; align-items: center; gap: var(--sp-1); }
+	.pagination-status { font-size: 11px; color: var(--text-tertiary); padding: 0 var(--sp-2); }
+	.empty-row { padding: var(--sp-4); text-align: center; font-size: 11px; color: var(--text-tertiary); }
 </style>

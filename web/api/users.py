@@ -390,32 +390,97 @@ class UserStore:
         self._blob_save(users)
         return UserRecord(**email_record)
 
-    def list_users(self, tier_filter: str | None = None) -> list[UserRecord]:
-        """List all users, optionally filtered by tier."""
+    def list_users(
+        self,
+        tier_filter: str | None = None,
+        *,
+        q: str | None = None,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[UserRecord]:
+        """List users with optional tier filter, text search, and pagination.
+
+        ``q`` is a case-insensitive substring match against email, name, and
+        company. ``limit`` and ``offset`` control pagination and are pushed
+        into the SQL query on the Postgres path. Pass ``limit=None`` for
+        "no limit" (retained so existing internal callers that want every
+        row don't break).
+        """
         self._ensure_migrated()
+        where, params = self._build_where(tier_filter, q)
+
         if self._use_pg:
             from .database import get_pg_conn
 
             with get_pg_conn() as conn:
                 if conn is not None:
                     cur = conn.cursor()
-                    if tier_filter:
-                        cur.execute(
-                            f"""SELECT {_COLS} FROM ck.users
-                                WHERE tier = %s
-                                ORDER BY signed_up_at DESC""",
-                            (tier_filter,),
-                        )
-                    else:
-                        cur.execute(f"SELECT {_COLS} FROM ck.users ORDER BY signed_up_at DESC")
+                    sql = f"SELECT {_COLS} FROM ck.users{where} ORDER BY signed_up_at DESC"
+                    if limit is not None:
+                        sql += " LIMIT %s OFFSET %s"
+                        params = (*params, int(limit), int(offset))
+                    cur.execute(sql, params)
                     rows = cur.fetchall()
                     cur.close()
                     return [_row_to_record(r) for r in rows]
 
         records = [UserRecord(**v) for v in self._blob_load().values()]
-        if tier_filter:
-            records = [r for r in records if r.tier == tier_filter]
+        records = [r for r in records if self._matches(r, tier_filter, q)]
+        records.sort(key=lambda r: r.signed_up_at, reverse=True)
+        if limit is not None:
+            records = records[offset : offset + int(limit)]
         return records
+
+    def count_users(self, tier_filter: str | None = None, *, q: str | None = None) -> int:
+        """Count users matching the given tier/search filter."""
+        self._ensure_migrated()
+        where, params = self._build_where(tier_filter, q)
+
+        if self._use_pg:
+            from .database import get_pg_conn
+
+            with get_pg_conn() as conn:
+                if conn is not None:
+                    cur = conn.cursor()
+                    cur.execute(f"SELECT COUNT(*) FROM ck.users{where}", params)
+                    row = cur.fetchone()
+                    cur.close()
+                    return int(row[0] or 0)
+
+        return sum(
+            1
+            for v in self._blob_load().values()
+            if self._matches(UserRecord(**v), tier_filter, q)
+        )
+
+    @staticmethod
+    def _build_where(tier_filter: str | None, q: str | None) -> tuple[str, tuple]:
+        clauses: list[str] = []
+        params: list[Any] = []
+        if tier_filter:
+            clauses.append("tier = %s")
+            params.append(tier_filter)
+        if q:
+            # ILIKE wildcard escape: % and _ are the only specials
+            like = "%" + q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+            clauses.append("(email ILIKE %s OR name ILIKE %s OR company ILIKE %s)")
+            params.extend([like, like, like])
+        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+        return where, tuple(params)
+
+    @staticmethod
+    def _matches(r: UserRecord, tier_filter: str | None, q: str | None) -> bool:
+        if tier_filter and r.tier != tier_filter:
+            return False
+        if q:
+            needle = q.lower()
+            if (
+                needle not in (r.email or "").lower()
+                and needle not in (r.name or "").lower()
+                and needle not in (r.company or "").lower()
+            ):
+                return False
+        return True
 
     def set_tier(self, user_id: str, tier: str, approved_by: str = "") -> UserRecord | None:
         """Update a user's tier. Also mirrors to Supabase auth.users."""
