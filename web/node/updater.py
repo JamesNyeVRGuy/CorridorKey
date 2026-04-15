@@ -115,9 +115,7 @@ def check_for_update() -> dict | None:
             if not published:
                 return None
             try:
-                published_ts = int(
-                    datetime.fromisoformat(published.replace("Z", "+00:00")).timestamp()
-                )
+                published_ts = int(datetime.fromisoformat(published.replace("Z", "+00:00")).timestamp())
             except ValueError:
                 return None
 

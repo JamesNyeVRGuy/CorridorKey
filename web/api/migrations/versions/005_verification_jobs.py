@@ -37,10 +37,7 @@ def upgrade() -> None:
             completed_at TIMESTAMPTZ
         )
     """)
-    op.execute(
-        "CREATE INDEX IF NOT EXISTS idx_ck_verification_jobs_status "
-        "ON ck.verification_jobs (status)"
-    )
+    op.execute("CREATE INDEX IF NOT EXISTS idx_ck_verification_jobs_status ON ck.verification_jobs (status)")
     op.execute("""
         DO $$ BEGIN
             IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'postgres') THEN

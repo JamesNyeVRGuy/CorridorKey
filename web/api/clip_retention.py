@@ -69,9 +69,7 @@ def get_retention_policy() -> RetentionPolicy:
     with get_pg_conn() as conn:
         if conn is not None:
             cur = conn.cursor()
-            cur.execute(
-                "SELECT policy FROM ck.clip_retention_policy WHERE id = 'default'"
-            )
+            cur.execute("SELECT policy FROM ck.clip_retention_policy WHERE id = 'default'")
             row = cur.fetchone()
             cur.close()
             if row and isinstance(row[0], dict):

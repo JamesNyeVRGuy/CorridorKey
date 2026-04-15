@@ -244,9 +244,7 @@ class OrgStore:
         return []
 
     def _list_personal_orgs_blob(self, user_id: str) -> list[Org]:
-        personals = [
-            org for org in self.list_user_orgs(user_id) if org.personal and org.owner_id == user_id
-        ]
+        personals = [org for org in self.list_user_orgs(user_id) if org.personal and org.owner_id == user_id]
         personals.sort(key=lambda o: (o.created_at, o.org_id))
         return personals
 

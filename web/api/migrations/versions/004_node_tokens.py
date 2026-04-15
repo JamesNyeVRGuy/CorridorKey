@@ -38,10 +38,7 @@ def upgrade() -> None:
         )
     """)
     op.execute("CREATE INDEX IF NOT EXISTS idx_ck_node_tokens_org ON ck.node_tokens (org_id)")
-    op.execute(
-        "CREATE INDEX IF NOT EXISTS idx_ck_node_tokens_active "
-        "ON ck.node_tokens (token) WHERE revoked = FALSE"
-    )
+    op.execute("CREATE INDEX IF NOT EXISTS idx_ck_node_tokens_active ON ck.node_tokens (token) WHERE revoked = FALSE")
     op.execute("""
         DO $$ BEGIN
             IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'postgres') THEN

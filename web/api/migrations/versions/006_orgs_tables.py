@@ -49,8 +49,7 @@ def upgrade() -> None:
     """)
     op.execute("CREATE INDEX IF NOT EXISTS idx_ck_orgs_owner ON ck.orgs (owner_id)")
     op.execute(
-        "CREATE UNIQUE INDEX IF NOT EXISTS orgs_one_personal_per_owner "
-        "ON ck.orgs (owner_id) WHERE personal = TRUE"
+        "CREATE UNIQUE INDEX IF NOT EXISTS orgs_one_personal_per_owner ON ck.orgs (owner_id) WHERE personal = TRUE"
     )
     op.execute("""
         CREATE TABLE IF NOT EXISTS ck.org_members (
