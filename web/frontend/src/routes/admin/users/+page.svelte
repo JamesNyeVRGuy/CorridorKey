@@ -19,7 +19,6 @@
 	const PAGE_SIZES = [25, 50, 100, 200];
 
 	let users = $state<UserRecord[]>([]);
-	let pendingUsers = $state<UserRecord[]>([]);
 	let loading = $state(true);
 	let actionInProgress = $state<string | null>(null);
 	let searchQuery = $state('');
@@ -121,17 +120,29 @@
 	async function loadUsers() {
 		listLoading = true;
 		try {
+			// Main list (paginated, filtered) + a cheap count-only probe so
+			// the "Pending (N)" chip stays fresh regardless of the active
+			// tier filter. limit=1 gives us total without fetching the rows.
 			const [allRes, pendingRes] = await Promise.all([
 				adminFetch(`/api/admin/users?${buildUsersQuery()}`),
-				adminFetch('/api/admin/users/pending?limit=200'),
+				adminFetch('/api/admin/users/pending?limit=1'),
 			]);
 			users = allRes.users;
 			total = allRes.total ?? allRes.users.length;
-			pendingUsers = pendingRes.users;
 			pendingTotal = pendingRes.total ?? pendingRes.users.length;
 		} finally {
 			listLoading = false;
 		}
+	}
+
+	function filterToPending() {
+		tierFilter = 'pending';
+		onFiltersChanged();
+	}
+
+	function showAllTiers() {
+		tierFilter = 'all';
+		onFiltersChanged();
 	}
 
 	function goToPage(p: number) {
@@ -255,37 +266,17 @@
 {#if loading}
 	<div class="loading mono">Loading users...</div>
 {:else}
-	<!-- Pending approvals — prominent section -->
-	{#if pendingUsers.length > 0}
-		<div class="pending-section">
-			<div class="pending-header">
-				<h2 class="section-title mono">PENDING APPROVAL <span class="count-badge">{pendingTotal}</span></h2>
-			</div>
-			<div class="pending-grid">
-				{#each pendingUsers as pu (pu.user_id)}
-					<div class="pending-card">
-						<div class="pending-top">
-							<span class="pending-name">{displayName(pu)}</span>
-							<span class="pending-time mono">{timeAgo(pu.signed_up_at)}</span>
-						</div>
-						<span class="pending-email mono">{pu.email}</span>
-						{#if pu.company || pu.role}
-							<div class="pending-profile">
-								{#if pu.company}<span class="profile-tag mono">{pu.company}</span>{/if}
-								{#if pu.role}<span class="profile-tag mono">{pu.role}</span>{/if}
-							</div>
-						{/if}
-						{#if pu.use_case}
-							<p class="pending-usecase">{pu.use_case}</p>
-						{/if}
-						<div class="pending-actions">
-							<button class="btn-approve mono" onclick={() => approveUser(pu.user_id)} disabled={actionInProgress === pu.user_id}>APPROVE</button>
-							<button class="btn-reject mono" onclick={() => rejectUser(pu.user_id)} disabled={actionInProgress === pu.user_id}>REJECT</button>
-						</div>
-					</div>
-				{/each}
-			</div>
-		</div>
+	<!-- Pending filter chip -->
+	{#if pendingTotal > 0}
+		<button
+			class="pending-chip mono"
+			class:active={tierFilter === 'pending'}
+			onclick={() => (tierFilter === 'pending' ? showAllTiers() : filterToPending())}
+		>
+			<span class="chip-dot"></span>
+			<span>{pendingTotal} PENDING APPROVAL</span>
+			<span class="chip-hint">{tierFilter === 'pending' ? 'Click to clear' : 'Click to filter'}</span>
+		</button>
 	{/if}
 
 	<!-- Invite link generator -->
@@ -354,16 +345,42 @@
 	<!-- User list -->
 	<div class="user-list">
 		{#each users as u (u.user_id)}
-			<button class="user-row" onclick={() => toggleExpand(u.user_id)} class:expanded={expandedUser === u.user_id} class:selected={selectedUsers.has(u.user_id)}>
+			<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+			<div
+				class="user-row"
+				onclick={() => toggleExpand(u.user_id)}
+				class:expanded={expandedUser === u.user_id}
+				class:selected={selectedUsers.has(u.user_id)}
+				class:pending={u.tier === 'pending'}
+				role="button"
+				tabindex="0"
+				onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleExpand(u.user_id); } }}
+			>
 				<input type="checkbox" class="row-check" checked={selectedUsers.has(u.user_id)} onclick={(e) => toggleSelect(u.user_id, e)} />
 				<span class="tier-dot" data-tier={u.tier}></span>
 				<span class="user-name">{displayName(u)}</span>
 				<span class="user-email mono">{u.email}</span>
 				{#if u.company}<span class="user-company mono">{u.company}</span>{/if}
 				<span class="tier-badge mono" data-tier={u.tier}>{u.tier}</span>
+				<span class="row-actions">
+					{#if u.tier === 'pending'}
+						<button
+							class="btn-approve-sm mono"
+							title="Approve this user"
+							onclick={(e) => { e.stopPropagation(); approveUser(u.user_id); }}
+							disabled={actionInProgress === u.user_id}
+						>APPROVE</button>
+						<button
+							class="btn-reject-sm mono"
+							title="Reject this user"
+							onclick={(e) => { e.stopPropagation(); rejectUser(u.user_id); }}
+							disabled={actionInProgress === u.user_id}
+						>REJECT</button>
+					{/if}
+				</span>
 				<span class="user-date mono">{timeAgo(u.signed_up_at)}</span>
 				<span class="expand-icon mono">{expandedUser === u.user_id ? '▲' : '▼'}</span>
-			</button>
+			</div>
 
 			{#if expandedUser === u.user_id}
 				<div class="user-detail">
@@ -464,53 +481,36 @@
 <style>
 	.loading { text-align: center; padding: var(--sp-8); color: var(--text-tertiary); font-size: 12px; }
 
-	/* Pending section */
-	.pending-section {
-		background: var(--surface-1); border: 1px solid rgba(255, 242, 3, 0.15);
-		border-radius: var(--radius-md); overflow: hidden;
+	/* Pending filter chip */
+	.pending-chip {
+		display: inline-flex; align-items: center; gap: var(--sp-2);
+		padding: 8px 14px; font-size: 11px; letter-spacing: 0.08em; font-weight: 600;
+		background: rgba(255, 242, 3, 0.08); color: var(--accent);
+		border: 1px solid rgba(255, 242, 3, 0.25); border-radius: var(--radius-md);
+		cursor: pointer; transition: all 0.15s; align-self: flex-start;
 	}
-	.pending-header {
-		padding: var(--sp-3) var(--sp-4); border-bottom: 1px solid var(--border);
-		background: rgba(255, 242, 3, 0.03);
-	}
-	.section-title { font-size: 10px; letter-spacing: 0.1em; color: var(--text-tertiary); font-weight: 600; display: flex; align-items: center; gap: var(--sp-2); }
-	.count-badge {
-		display: inline-flex; align-items: center; justify-content: center; min-width: 20px; height: 20px;
-		padding: 0 6px; font-size: 10px; background: rgba(255, 242, 3, 0.15); color: var(--accent);
-		border-radius: 10px;
-	}
+	.pending-chip:hover { background: rgba(255, 242, 3, 0.15); }
+	.pending-chip.active { background: rgba(255, 242, 3, 0.2); border-color: var(--accent); }
+	.pending-chip .chip-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 6px var(--accent); }
+	.pending-chip .chip-hint { font-size: 9px; color: var(--text-tertiary); font-weight: 400; letter-spacing: 0.04em; }
 
-	.pending-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: var(--sp-3); padding: var(--sp-4); }
-
-	.pending-card {
-		background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-md);
-		padding: var(--sp-3); display: flex; flex-direction: column; gap: var(--sp-2);
-	}
-	.pending-top { display: flex; justify-content: space-between; align-items: center; }
-	.pending-name { font-size: 14px; font-weight: 600; color: var(--text-primary); }
-	.pending-time { font-size: 10px; color: var(--text-tertiary); }
-	.pending-email { font-size: 11px; color: var(--text-tertiary); }
-	.pending-profile { display: flex; gap: var(--sp-1); flex-wrap: wrap; }
-	.profile-tag {
-		font-size: 10px; padding: 2px 6px; border-radius: 3px; letter-spacing: 0.04em;
-		background: rgba(0, 154, 218, 0.1); color: var(--secondary);
-	}
-	.pending-usecase { font-size: 12px; color: var(--text-secondary); font-style: italic; line-height: 1.4; }
-	.pending-actions { display: flex; gap: var(--sp-2); margin-top: var(--sp-1); }
-
-	.btn-approve {
-		flex: 1; padding: 6px; font-size: 10px; letter-spacing: 0.08em; font-weight: 600;
-		background: rgba(93, 216, 121, 0.1); color: var(--state-complete); border: 1px solid rgba(93, 216, 121, 0.3);
+	/* Inline row actions (approve/reject on pending rows) */
+	.row-actions { display: flex; gap: var(--sp-1); }
+	.btn-approve-sm, .btn-reject-sm {
+		padding: 4px 8px; font-size: 9px; letter-spacing: 0.06em; font-weight: 600;
 		border-radius: var(--radius-sm); cursor: pointer; transition: all 0.15s;
 	}
-	.btn-approve:hover:not(:disabled) { background: rgba(93, 216, 121, 0.2); }
-	.btn-reject {
-		flex: 1; padding: 6px; font-size: 10px; letter-spacing: 0.08em; font-weight: 600;
-		background: rgba(255, 82, 82, 0.1); color: var(--state-error); border: 1px solid rgba(255, 82, 82, 0.3);
-		border-radius: var(--radius-sm); cursor: pointer; transition: all 0.15s;
+	.btn-approve-sm {
+		background: rgba(93, 216, 121, 0.1); color: var(--state-complete);
+		border: 1px solid rgba(93, 216, 121, 0.3);
 	}
-	.btn-reject:hover:not(:disabled) { background: rgba(255, 82, 82, 0.2); }
-	.btn-approve:disabled, .btn-reject:disabled { opacity: 0.4; cursor: not-allowed; }
+	.btn-approve-sm:hover:not(:disabled) { background: rgba(93, 216, 121, 0.2); }
+	.btn-reject-sm {
+		background: rgba(255, 82, 82, 0.1); color: var(--state-error);
+		border: 1px solid rgba(255, 82, 82, 0.3);
+	}
+	.btn-reject-sm:hover:not(:disabled) { background: rgba(255, 82, 82, 0.2); }
+	.btn-approve-sm:disabled, .btn-reject-sm:disabled { opacity: 0.4; cursor: not-allowed; }
 
 	/* Invite section */
 	.invite-section { display: flex; flex-direction: column; gap: var(--sp-2); }
@@ -566,16 +566,19 @@
 	}
 
 	.user-row {
-		display: grid; grid-template-columns: 18px 8px 1fr 1.5fr auto auto auto 20px;
+		display: grid; grid-template-columns: 18px 8px 1fr 1.5fr auto auto auto auto 20px;
 		gap: var(--sp-2); align-items: center; padding: var(--sp-2) var(--sp-3);
 		border-bottom: 1px solid var(--border-subtle); width: 100%; text-align: left;
-		font: inherit; color: inherit; background: transparent; border-left: none; border-right: none; border-top: none;
+		font: inherit; color: inherit; background: transparent;
 		cursor: pointer; transition: background 0.15s;
 	}
+	.user-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 	.user-row:hover { background: var(--surface-2); }
 	.user-row:last-child { border-bottom: none; }
 	.user-row.expanded { background: var(--surface-2); border-left: 3px solid var(--accent); }
 	.user-row.selected { background: rgba(255, 242, 3, 0.04); }
+	.user-row.pending { background: rgba(255, 242, 3, 0.05); border-left: 3px solid rgba(255, 242, 3, 0.4); }
+	.user-row.pending:hover { background: rgba(255, 242, 3, 0.1); }
 	.row-check { accent-color: var(--accent); cursor: pointer; margin: 0; }
 
 	.tier-dot { width: 8px; height: 8px; border-radius: 50%; }
