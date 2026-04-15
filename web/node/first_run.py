@@ -136,15 +136,25 @@ def run_setup_dialog() -> bool:
         else:
             os.makedirs(_CONFIG_DIR, exist_ok=True)
             save_path = _CONFIG_FILE
-        with open(save_path, "w") as f:
-            f.write(config_content)
+        try:
+            with open(save_path, "w") as f:
+                f.write(config_content)
+        except OSError as e:
+            logger.exception("Failed to save config to %s", save_path)
+            messagebox.showerror(
+                "Could not save config",
+                f"Failed to write {save_path}:\n\n{e}\n\n"
+                "Check that you have write permission to this folder, "
+                "or run the app from a user-writable location.",
+            )
+            return
 
         # Also set in current environment
         os.environ["CK_MAIN_URL"] = url
         os.environ["CK_AUTH_TOKEN"] = token
         os.environ["CK_NODE_NAME"] = name
 
-        logger.info("Config saved to %s", _CONFIG_FILE)
+        logger.info("Config saved to %s", save_path)
         saved[0] = True
         root.destroy()
 

@@ -66,8 +66,8 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName}"; Flags: nowait postinstall skipifsilent shellexec
 
 [UninstallDelete]
-; Clean up config and cache on uninstall
-Type: filesandordirs; Name: "{app}\node.env"
+; Clean up cache on uninstall. node.env is intentionally preserved so that
+; reinstalling (e.g. to update the binary) keeps the user's saved token.
 Type: filesandordirs; Name: "{app}\__pycache__"
 
 [Code]
