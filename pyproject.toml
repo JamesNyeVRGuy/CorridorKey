@@ -106,6 +106,12 @@ extend-exclude = ["gvm_core/", "VideoMaMaInferenceModule/"]
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B"]
 
+[tool.ruff.lint.per-file-ignores]
+# PyInstaller spec files are a DSL: Analysis/PYZ/EXE/COLLECT/SPECPATH are
+# injected by the build tool at runtime, not imported, so F821 ("undefined
+# name") is a false positive here.
+"*.spec" = ["F821"]
+
 [tool.ruff.format]
 # Third-party code excluded via top-level exclude
 

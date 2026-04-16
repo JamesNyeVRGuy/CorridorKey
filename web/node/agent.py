@@ -546,8 +546,11 @@ class NodeAgent:
         clips = service.scan_clips(clips_dir)
         clip = next((c for c in clips if c.name == clip_name), None)
         if clip is None:
-            self._report_result(job_id, "failed", f"Clip '{clip_name}' not found in {clips_dir}")
-            return
+            # Raise so _process_job_on_gpu catches it and reports failed.
+            # Reporting failed inline and returning normally would fall
+            # through to _process_job's upload + "completed" path and
+            # clobber the failed state with a bogus "completed 0 frames".
+            raise RuntimeError(f"Clip '{clip_name}' not found in {clips_dir}")
 
         job = GPUJob(job_type=job_type, clip_name=clip_name, params=params)
         job.id = job_id
@@ -591,9 +594,16 @@ class NodeAgent:
                 )
 
             # Don't report completed here — _process_job reports after upload
-        except Exception as e:
-            logger.exception(f"Job {job_id} failed")
-            self._report_result(job_id, "failed", str(e))
+        except Exception:
+            # Log with job context then re-raise so _process_job_on_gpu
+            # catches it and reports failed. Reporting "failed" inline
+            # and falling through would let _process_job overwrite the
+            # failed state with "completed" after running the upload
+            # step on zero output — the exact "COMPLETED 0 frames 0 fps"
+            # bug users saw when GVM crashed on PyInstaller metadata
+            # lookups like "No package metadata was found for imageio".
+            logger.exception(f"Job {job_id} failed during GPU execution")
+            raise
         finally:
             service.unload_engines()
 
@@ -607,39 +617,46 @@ class NodeAgent:
         proc = _mp.Process(target=gpu_worker_main, args=(gpu_index, task_queue, result_queue), daemon=True)
         proc.start()
 
-        # Wait for ready
-        msg = result_queue.get(timeout=60)
-        if msg.get("status") != "ready":
-            self._report_result(job_data["id"], "failed", "GPU worker failed to start")
-            proc.terminate()
-            return
-
-        # Send the job (already a dict, just need to wrap it)
-        task_queue.put({"action": "run", "job": job_data, "clips_dir": clips_dir})
-
-        # Read results
         job_id = job_data["id"]
-        while True:
-            try:
-                msg = result_queue.get(timeout=600)
-            except Exception:
-                self._report_result(job_id, "failed", "Timed out waiting for GPU worker")
-                break
+        failure: str | None = None
 
-            status = msg.get("status")
-            if status == "progress":
-                self._report_progress(job_id, msg.get("current", 0), msg.get("total", 0))
-            elif status == "completed":
-                # Don't report completed here — _process_job reports after upload
-                break
-            elif status == "failed":
-                self._report_result(job_id, "failed", msg.get("error", "Unknown error"))
-                break
+        try:
+            # Wait for ready
+            msg = result_queue.get(timeout=60)
+            if msg.get("status") != "ready":
+                failure = "GPU worker failed to start"
+            else:
+                # Send the job (already a dict, just need to wrap it)
+                task_queue.put({"action": "run", "job": job_data, "clips_dir": clips_dir})
 
-        task_queue.put({"action": "stop"})
-        proc.join(timeout=10)
-        if proc.is_alive():
-            proc.terminate()
+                while True:
+                    try:
+                        msg = result_queue.get(timeout=600)
+                    except Exception:
+                        failure = "Timed out waiting for GPU worker"
+                        break
+
+                    status = msg.get("status")
+                    if status == "progress":
+                        self._report_progress(job_id, msg.get("current", 0), msg.get("total", 0))
+                    elif status == "completed":
+                        # Don't report completed here — _process_job reports after upload
+                        break
+                    elif status == "failed":
+                        failure = msg.get("error", "Unknown error")
+                        break
+        finally:
+            task_queue.put({"action": "stop"})
+            proc.join(timeout=10)
+            if proc.is_alive():
+                proc.terminate()
+
+        if failure is not None:
+            # Raise so _process_job_on_gpu catches it and reports failed.
+            # Reporting inline here and returning normally would fall
+            # through to _process_job's upload + "completed" path and
+            # clobber the failure with "completed 0 frames".
+            raise RuntimeError(failure)
 
     def run(self) -> None:
         """Main loop — sync weights, register, then poll for jobs."""

@@ -11,6 +11,9 @@ the GPU vendor and downloads the appropriate CUDA or ROCm torch addon.
 Model weights are also downloaded on first launch.
 """
 
+import glob as _glob
+import importlib
+import os
 import sys
 from pathlib import Path
 
@@ -18,7 +21,10 @@ from PyInstaller.utils.hooks import collect_submodules, copy_metadata
 
 block_cipher = None
 
-# Repo root (spec file is at web/node/corridorkey-node.spec → up 2 levels)
+# Repo root (spec file is at web/node/corridorkey-node.spec → up 2 levels).
+# SPECPATH / Analysis / PYZ / EXE / COLLECT are injected by PyInstaller at
+# build time; ruff's F821 on them is suppressed via per-file-ignores in
+# pyproject.toml.
 ROOT = Path(SPECPATH).parent.parent
 
 # Collect all submodules for packages that use dynamic imports
@@ -52,28 +58,26 @@ _metadata = (
     + copy_metadata("tqdm")
     + copy_metadata("packaging")
     + copy_metadata("filelock")
+    + copy_metadata("imageio")
 )
 
 # Collect HIP/ROCm DLLs that PyInstaller's binary analysis misses.
 # The DLLs live in _rocm_sdk_core/bin/ and _rocm_sdk_libraries_custom/bin/
 # (note the underscore prefix — the non-prefixed packages are just Python wrappers).
 # We copy them into torch/lib/ so they're on the DLL search path at runtime.
-import glob as _glob
-import importlib
-
 _extra_binaries = []
 
 # Search rocm SDK native packages for DLLs.
 # These are the packages that contain the actual HIP/ROCm runtime libraries.
-for pkg_name in ['_rocm_sdk_core', '_rocm_sdk_libraries_custom']:
+for pkg_name in ["_rocm_sdk_core", "_rocm_sdk_libraries_custom"]:
     try:
         pkg = importlib.import_module(pkg_name)
         pkg_dir = os.path.dirname(pkg.__file__)
-        for f in _glob.glob(os.path.join(pkg_dir, '**', '*.dll'), recursive=True):
-            if 'clang_rt.asan' not in os.path.basename(f):
-                _extra_binaries.append((f, 'torch/lib'))
-        for f in _glob.glob(os.path.join(pkg_dir, '**', '*.so'), recursive=True):
-            _extra_binaries.append((f, 'torch/lib'))
+        for f in _glob.glob(os.path.join(pkg_dir, "**", "*.dll"), recursive=True):
+            if "clang_rt.asan" not in os.path.basename(f):
+                _extra_binaries.append((f, "torch/lib"))
+        for f in _glob.glob(os.path.join(pkg_dir, "**", "*.so"), recursive=True):
+            _extra_binaries.append((f, "torch/lib"))
     except ImportError:
         pass
 
@@ -210,7 +214,8 @@ a.datas = [(name, path, typ) for name, path, typ in a.datas if not any(p in name
 # - clang_rt.asan: debug-only ASAN runtime, crashes when loaded alongside system ucrtbase
 # - caffe2_nvrtc: NVIDIA DLL shipped in AMD torch wheel, crashes on AMD-only machines
 a.binaries = [
-    (name, path, typ) for name, path, typ in a.binaries
+    (name, path, typ)
+    for name, path, typ in a.binaries
     if "onnxruntime" not in name and "clang_rt.asan" not in name and "caffe2_nvrtc" not in name
 ]
 
