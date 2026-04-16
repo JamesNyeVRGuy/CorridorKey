@@ -103,12 +103,15 @@ def send_approval_otp_email(to: str) -> bool:
 
 def send_approval_email(to: str, name: str) -> bool:
     """Send account approval notification."""
+    import html as _html
+
+    safe_name = _html.escape(name) if name else ""
     subject = "Your CorridorKey account has been approved"
     html = f"""
     <div style="font-family: -apple-system, sans-serif; max-width: 480px; margin: 0 auto; padding: 32px;">
         <h2 style="color: #f0efe8; margin-bottom: 16px;">Account Approved</h2>
         <p style="color: #9d9c93; line-height: 1.6;">
-            Hi{(" " + name) if name else ""},
+            Hi{(" " + safe_name) if safe_name else ""},
         </p>
         <p style="color: #9d9c93; line-height: 1.6;">
             Your CorridorKey account has been approved. You can now sign in and start processing your footage.

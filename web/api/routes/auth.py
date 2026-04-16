@@ -32,12 +32,27 @@ class LoginRequest(BaseModel):
     password: str
 
 
+def _strip_html(value: str) -> str:
+    """Strip HTML tags from a user-provided string.
+
+    Defense-in-depth: Svelte auto-escapes on render, but profile
+    fields also flow into HTML emails (approval notification) and
+    webhook payloads where auto-escaping isn't guaranteed.
+    """
+    import re
+
+    return re.sub(r"<[^>]*>", "", value).strip() if value else ""
+
+
 class SignupRequest(BaseModel):
     email: EmailStr
     password: str
     name: str = ""
     invite_token: str = ""
     captcha_token: str = ""
+
+    def sanitized_name(self) -> str:
+        return _strip_html(self.name)
 
 
 class RegisterRequest(BaseModel):
@@ -50,6 +65,14 @@ class RegisterRequest(BaseModel):
     role: str = ""
     use_case: str = ""
     captcha_token: str = ""
+
+    def sanitized_fields(self) -> dict[str, str]:
+        return {
+            "name": _strip_html(self.name),
+            "company": _strip_html(self.company),
+            "role": _strip_html(self.role),
+            "use_case": _strip_html(self.use_case),
+        }
 
 
 # Cloudflare Turnstile verification. When CK_TURNSTILE_SECRET_KEY is
@@ -535,7 +558,7 @@ def signup_with_invite(req: SignupRequest, request: Request):
 
     # Record for approval workflow
     user_store = get_user_store()
-    user_store.record_signup(user_id=user_id, email=req.email, name=req.name)
+    user_store.record_signup(user_id=user_id, email=req.email, name=req.sanitized_name())
 
     return {"status": "created", "user_id": user_id}
 
@@ -580,6 +603,7 @@ def open_register(req: RegisterRequest, request: Request):
     try:
         import urllib.request
 
+        safe = req.sanitized_fields()
         admin_body = json.dumps(
             {
                 "email": req.email,
@@ -587,10 +611,10 @@ def open_register(req: RegisterRequest, request: Request):
                 "email_confirm": False,  # require email verification before login
                 "app_metadata": {"tier": "pending"},
                 "user_metadata": {
-                    "name": req.name,
-                    "company": req.company,
-                    "role": req.role,
-                    "use_case": req.use_case,
+                    "name": safe["name"],
+                    "company": safe["company"],
+                    "role": safe["role"],
+                    "use_case": safe["use_case"],
                 },
             }
         ).encode()
@@ -619,12 +643,12 @@ def open_register(req: RegisterRequest, request: Request):
     user_store.record_signup(
         user_id=user_id,
         email=req.email,
-        name=req.name,
-        company=req.company,
-        role=req.role,
-        use_case=req.use_case,
+        name=safe["name"],
+        company=safe["company"],
+        role=safe["role"],
+        use_case=safe["use_case"],
     )
-    logger.info(f"Open registration: {req.email} → pending (company={req.company!r})")
+    logger.info(f"Open registration: {req.email} → pending (company={safe['company']!r})")
 
     return _generic_response
 
