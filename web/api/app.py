@@ -302,8 +302,9 @@ def create_app() -> FastAPI:
     #
     # Solution: RateLimit added FIRST (innermost), Auth second, GZip last.
     # Execution: GZip → Auth (injects user) → RateLimit (reads user) → Route
-    from .rate_limit import RateLimitMiddleware
     from fastapi.middleware.cors import CORSMiddleware
+
+    from .rate_limit import RateLimitMiddleware
 
     app.add_middleware(RateLimitMiddleware)  # innermost — runs after auth
     app.add_middleware(AuthMiddleware)  # middle — injects user context
