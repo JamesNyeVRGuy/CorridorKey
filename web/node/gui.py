@@ -34,6 +34,46 @@ _CONFIG_DIR = os.path.join(os.path.expanduser("~"), ".corridorkey")
 _CONFIG_FILE = os.path.join(_CONFIG_DIR, "node.env")
 
 
+def write_node_env(
+    config_dir: str,
+    config_file: str,
+    url: str,
+    token: str,
+    name: str,
+) -> tuple[bool, str]:
+    """Atomically write node.env. Returns (ok, message).
+
+    Extracted from the GUI save handler so it can be unit-tested without
+    tkinter. The GUI wraps this, shows the message in the status label,
+    and logs at error level on failure (CRKY-194).
+    """
+    contents = (
+        f"CK_MAIN_URL={url}\n"
+        f"CK_AUTH_TOKEN={token}\n"
+        f"CK_NODE_NAME={name}\n"
+        "CK_NODE_GPUS=auto\n"
+        "CK_NODE_PREWARM=true\n"
+    )
+    try:
+        os.makedirs(config_dir, exist_ok=True)
+    except OSError as e:
+        return False, f"Could not create {config_dir}: {e}"
+    try:
+        tmp_path = config_file + ".tmp"
+        with open(tmp_path, "w") as f:
+            f.write(contents)
+        os.replace(tmp_path, config_file)
+    except OSError as e:
+        return False, f"Save failed: {e}"
+    try:
+        written = os.path.getsize(config_file)
+    except OSError as e:
+        return False, f"Wrote file but can't read it back: {e}"
+    if written < len(contents) - 2:
+        return False, f"Save incomplete: {written} of {len(contents)} bytes"
+    return True, f"Saved to {config_file}. Restart to apply."
+
+
 class NodeSettingsWindow:
     """Main settings window for the node agent."""
 
@@ -286,16 +326,28 @@ class NodeSettingsWindow:
         entry.pack(side="left", fill="x", expand=True, ipady=3)
 
     def _save_config(self) -> None:
-        os.makedirs(_CONFIG_DIR, exist_ok=True)
-        with open(_CONFIG_FILE, "w") as f:
-            f.write(f"CK_MAIN_URL={self._url_var.get()}\n")
-            f.write(f"CK_AUTH_TOKEN={self._token_var.get()}\n")
-            f.write(f"CK_NODE_NAME={self._name_var.get()}\n")
-            f.write("CK_NODE_GPUS=auto\n")
-            f.write("CK_NODE_PREWARM=true\n")
+        """Persist config to ~/.corridorkey/node.env with error surfacing.
 
-        self._save_status.config(text="Saved! Restart to apply.", fg=_GREEN)
-        self.root.after(3000, lambda: self._save_status.config(text=""))
+        CRKY-194: Previously bare open() with no error handling; failures
+        (read-only home, antivirus blocking writes, permission denied)
+        silently crashed the GUI callback and left the user thinking the
+        button did nothing. Now delegates to write_node_env() which returns
+        a real ok/message, and shows the message in the status label.
+        """
+        ok, msg = write_node_env(
+            _CONFIG_DIR,
+            _CONFIG_FILE,
+            self._url_var.get(),
+            self._token_var.get(),
+            self._name_var.get(),
+        )
+        if ok:
+            self._save_status.config(text=msg, fg=_GREEN)
+            logger.info(msg)
+            self.root.after(5000, lambda: self._save_status.config(text=""))
+        else:
+            self._save_status.config(text=msg, fg=_RED)
+            logger.error(msg)
 
     def _toggle_pause(self) -> None:
         if self.tray:
