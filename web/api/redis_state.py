@@ -220,13 +220,17 @@ class RedisNodeState:
         pipe = r.pipeline()
         pipe.srem("ck:nodes:dismissed", info.node_id)
 
-        # On re-register: merge new fields into existing node, preserve UI settings
+        # On re-register: merge new fields into existing node, preserve UI settings.
+        # CRKY-197: visibility is UI-set and must be preserved the same way
+        # paused/schedule/accepted_types are, or a docker container restart will
+        # reset shared nodes back to private.
         existing_json = r.get(_node_key(info.node_id))
         if existing_json:
             existing = NodeInfo.from_dict(json.loads(existing_json))
             info.paused = existing.paused
             info.schedule = existing.schedule
             info.accepted_types = existing.accepted_types
+            info.visibility = existing.visibility
             info.health_history = existing.health_history
             info.recent_logs = existing.recent_logs
             if not info.org_id:

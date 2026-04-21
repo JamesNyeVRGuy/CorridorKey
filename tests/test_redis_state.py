@@ -224,6 +224,28 @@ class TestRedisNodeState:
         assert node.gpu_name == "RTX 5090"  # updated
         assert node.paused is True  # preserved from before
 
+    def test_re_register_preserves_visibility(self, node_state):
+        """CRKY-197: docker container restart must not reset shared->private."""
+        info = _make_node()
+        node_state.register(info)
+        # Simulate a user toggling visibility to shared via the UI
+        node = node_state.get_node("abc123")
+        node.visibility = "shared"
+        import web.api.redis_state as rs
+
+        get_redis = __import__("web.api.redis_client", fromlist=["get_redis"]).get_redis
+        r = get_redis()
+        r.set(rs._node_key("abc123"), rs._save_node(node))
+
+        # Node container restarts and re-registers with a fresh NodeInfo
+        # (default visibility="private").
+        info2 = _make_node(gpu_name="RTX 5090")
+        assert info2.visibility == "private"
+        node_state.register(info2)
+        node = node_state.get_node("abc123")
+        assert node.gpu_name == "RTX 5090"  # new hardware info applied
+        assert node.visibility == "shared"  # UI setting preserved, not clobbered
+
 
 # ---------------------------------------------------------------------------
 # RedisJobState tests

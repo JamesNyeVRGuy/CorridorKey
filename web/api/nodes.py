@@ -306,7 +306,9 @@ class NodeRegistry:
                 existing.build_number = info.build_number
                 existing.status = "online"
                 existing.last_heartbeat = time.time()
-                # Preserve paused and schedule on re-register (set from UI)
+                # Preserve paused, schedule, visibility, and accepted_types on
+                # re-register — these are all UI-set fields. CRKY-197: visibility
+                # was being reset because it wasn't in this preserve list.
                 logger.info(f"Node re-registered: {info.name} ({info.node_id})")
             else:
                 info.last_heartbeat = time.time()

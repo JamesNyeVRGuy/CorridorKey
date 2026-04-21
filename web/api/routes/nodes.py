@@ -306,6 +306,10 @@ def register_node(req: NodeRegisterRequest, request: Request):
     node = get_node_state().get_node(req.node_id)
     if node:
         _restore_node_config(node)
+        # Write the restored fields back — required on Redis-backed state where
+        # get_node() returns a deserialized copy and mutations don't round-trip
+        # automatically (CRKY-197). In-memory state is a no-op here.
+        get_node_state().update_node(req.node_id, node)
         manager.send_node_update(node.to_dict(), org_id=node.org_id)
     # Version comparison — use build_number for proper ordering
     from ..version import BUILD_NUMBER, MIN_NODE_BUILD, VERSION_STRING
