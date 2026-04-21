@@ -599,6 +599,10 @@ def report_job_progress(node_id: str, job_id: str, current: int, total: int, req
             job.current_frame = current
             job.total_frames = total
             job.last_progress_at = _time.time()
+            # Persist the mutation — on Redis-backed state, find_job_by_id
+            # returns a deserialized copy, so mutating the local variable
+            # alone doesn't round-trip. No-op on in-memory state.
+            queue.update_job(job)
     oid = job.org_id if job else None
     cancelled = job.status.value == "cancelled" if job else False
     if current > 0 or total > 0:

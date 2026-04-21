@@ -614,6 +614,18 @@ class RedisJobState:
     def find_job_by_id(self, job_id: str) -> GPUJob | None:
         return _load_job(get_redis().get(_job_key(job_id)))
 
+    def update_job(self, job: GPUJob) -> None:
+        """Write back a mutated job. Needed because find_job_by_id returns a
+        deserialized copy on Redis; without this, mutations from route handlers
+        (progress reports, cancellation flags) don't round-trip and are lost
+        (CRKY-189: progress updates landed on an ephemeral copy and
+        total_frames stayed 0 through to completion)."""
+        r = get_redis()
+        # Only persist if the job key still exists — avoids resurrecting
+        # a deleted job via a stale reference.
+        if r.exists(_job_key(job.id)):
+            r.set(_job_key(job.id), _save_job(job))
+
     # --- Shard operations ---
 
     def _all_shard_jobs(self, shard_group: str) -> list[GPUJob]:

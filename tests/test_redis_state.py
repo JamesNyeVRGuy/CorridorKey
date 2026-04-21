@@ -224,6 +224,40 @@ class TestRedisNodeState:
         assert node.gpu_name == "RTX 5090"  # updated
         assert node.paused is True  # preserved from before
 
+    def test_update_job_persists_progress_mutation(self, job_state):
+        """CRKY-189: progress updates landed on a deserialized copy and
+        total_frames stayed 0 through to completion. update_job() exists to
+        round-trip mutations back to Redis."""
+        job = _make_job()
+        job_state.submit(job)
+        # Simulate what report_job_progress does: find, mutate, update_job
+        fetched = job_state.find_job_by_id(job.id)
+        assert fetched is not None
+        assert fetched.total_frames == 0
+        fetched.current_frame = 42
+        fetched.total_frames = 100
+        job_state.update_job(fetched)
+        # Re-fetch; the mutation should have persisted
+        again = job_state.find_job_by_id(job.id)
+        assert again is not None
+        assert again.current_frame == 42
+        assert again.total_frames == 100
+
+    def test_update_job_does_not_resurrect_deleted_job(self, job_state):
+        """Stale references shouldn't bring a cancelled/completed+cleaned job back."""
+        import web.api.redis_state as rs
+
+        get_redis = __import__("web.api.redis_client", fromlist=["get_redis"]).get_redis
+        job = _make_job()
+        job_state.submit(job)
+        fetched = job_state.find_job_by_id(job.id)
+        # Wipe the job key out-of-band
+        get_redis().delete(rs._job_key(job.id))
+        # update_job should no-op rather than re-create the key
+        fetched.total_frames = 999
+        job_state.update_job(fetched)
+        assert job_state.find_job_by_id(job.id) is None
+
     def test_re_register_preserves_visibility(self, node_state):
         """CRKY-197: docker container restart must not reset shared->private."""
         info = _make_node()

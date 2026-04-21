@@ -82,6 +82,7 @@ class JobState(Protocol):
     def report_progress(self, clip_name: str, current: int, total: int) -> None: ...
     def report_warning(self, message: str) -> None: ...
     def find_job_by_id(self, job_id: str) -> GPUJob | None: ...
+    def update_job(self, job: GPUJob) -> None: ...
 
     # --- Shard operations ---
     def shard_group_progress(self, shard_group: str) -> dict[str, Any]: ...
@@ -259,6 +260,16 @@ class InMemoryJobState:
 
     def find_job_by_id(self, job_id: str) -> GPUJob | None:
         return self._queue.find_job_by_id(job_id)
+
+    def update_job(self, job: GPUJob) -> None:
+        """No-op for in-memory state: mutations are already visible via the
+        live reference returned by find_job_by_id. Provided so callers can
+        use one code path for both backends."""
+        # In-memory GPUJobQueue returns a live reference from find_job_by_id,
+        # so mutations persist automatically. This method exists to keep the
+        # protocol symmetric with the Redis backend which needs an explicit
+        # save.
+        return None
 
     # --- Shard operations ---
 
