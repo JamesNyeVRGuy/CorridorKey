@@ -225,7 +225,13 @@ def login_proxy(req: LoginRequest):
 
     The browser calls this instead of GoTrue directly. The server forwards
     the request to GoTrue using the internal URL and returns the session.
+
+    Error handling distinguishes "invalid credentials" from "email not
+    confirmed" (CRKY-201) so the login page can surface actionable messages
+    instead of a generic "Login failed". Wrong-email vs wrong-password both
+    map to the same generic error to avoid email enumeration.
     """
+    import urllib.error
     import urllib.request
 
     gotrue_url = os.environ.get(
@@ -251,6 +257,24 @@ def login_proxy(req: LoginRequest):
             "user",
         }
         return {k: v for k, v in data.items() if k in safe_keys}
+    except urllib.error.HTTPError as e:
+        # GoTrue returns JSON error bodies with error_description. Whitelist
+        # the messages safe to forward (ones that don't leak whether an email
+        # is registered or not).
+        try:
+            err_body = json.loads(e.read())
+        except Exception:
+            err_body = {}
+        desc = (err_body.get("error_description") or err_body.get("msg") or "").lower()
+        if "email not confirmed" in desc:
+            raise HTTPException(
+                status_code=403,
+                detail="Please check your email and click the verification link before signing in.",
+            ) from e
+        # Everything else (wrong password, unknown email, disabled user) collapses
+        # to the same generic response so an attacker can't enumerate registered
+        # emails via response differentiation.
+        raise HTTPException(status_code=401, detail="Invalid email or password.") from e
     except Exception as e:
         logger.error(f"GoTrue login proxy error: {e}")
         raise HTTPException(status_code=401, detail="Login failed") from e
