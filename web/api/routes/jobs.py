@@ -34,10 +34,10 @@ router = APIRouter(prefix="/api/jobs", tags=["jobs"], dependencies=[Depends(requ
 def _resolve_preset(preset_id: str | None, request: Request) -> tuple[InferenceParamsSchema, OutputConfigSchema] | None:
     if not preset_id:
         return None
+    from ..org_isolation import resolve_org_id
     from ..presets import get_preset
-    from .presets import _resolve_org_id
 
-    preset = get_preset(preset_id, _resolve_org_id(request))
+    preset = get_preset(preset_id, resolve_org_id(request))
     if not preset:
         raise HTTPException(status_code=404, detail=f"Preset '{preset_id}' not found")
     return preset.params, preset.output_config

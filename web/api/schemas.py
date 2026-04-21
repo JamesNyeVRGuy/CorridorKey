@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import re
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 # --- Clips ---
 
@@ -159,12 +160,22 @@ _MAX_PRESET_NAME = 100
 _MAX_PRESET_DESC = 500
 
 
+def _strip_html(value: str) -> str:
+    """Strip HTML tags from user-provided text (defense-in-depth)."""
+    return re.sub(r"<[^>]*>", "", value)
+
+
 class PresetCreateRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=_MAX_PRESET_NAME)
     description: str = Field("", max_length=_MAX_PRESET_DESC)
     params: InferenceParamsSchema = InferenceParamsSchema()
     output_config: OutputConfigSchema = OutputConfigSchema()
     is_default: bool = False
+
+    @field_validator("name", "description", mode="before")
+    @classmethod
+    def strip_html(cls, v: str) -> str:
+        return _strip_html(v) if isinstance(v, str) else v
 
 
 class PresetUpdateRequest(BaseModel):
@@ -174,12 +185,17 @@ class PresetUpdateRequest(BaseModel):
     output_config: OutputConfigSchema | None = None
     is_default: bool | None = None
 
+    @field_validator("name", "description", mode="before")
+    @classmethod
+    def strip_html(cls, v: str | None) -> str | None:
+        return _strip_html(v) if isinstance(v, str) else v
+
 
 class PresetSchema(BaseModel):
     id: str
     name: str
     description: str = ""
-    scope: Literal["global", "org"]
+    scope: Literal["org"]
     org_id: str | None = None
     params: InferenceParamsSchema = InferenceParamsSchema()
     output_config: OutputConfigSchema = OutputConfigSchema()

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+
 import pytest
 from pydantic import ValidationError
 
@@ -190,6 +192,17 @@ class TestPresetStorage:
         with pytest.raises(ValueError, match="Maximum"):
             create_preset("org-1", "One too many", "", InferenceParamsSchema(), OutputConfigSchema(), False, None)
 
+    def test_list_presets_default_first(self, mem_storage):
+        """list_presets returns default preset first, then alphabetical."""
+        create_preset("org-1", "Bravo", "", InferenceParamsSchema(), OutputConfigSchema(), False, None)
+        create_preset("org-1", "Alpha", "", InferenceParamsSchema(), OutputConfigSchema(), False, None)
+        create_preset("org-1", "Charlie", "", InferenceParamsSchema(), OutputConfigSchema(), True, None)
+        result = list_presets("org-1")
+        assert result[0].name == "Charlie"
+        assert result[0].is_default is True
+        assert result[1].name == "Alpha"
+        assert result[2].name == "Bravo"
+
     def test_max_limit_per_org_not_global(self, mem_storage):
         """Limit is per-org, not global."""
         from web.api.presets import _MAX_PRESETS_PER_ORG
@@ -222,3 +235,95 @@ class TestSchemaValidation:
     def test_preset_scope_rejects_invalid(self):
         with pytest.raises(ValidationError):
             PresetSchema(id="x", name="x", scope="admin")
+
+    def test_create_request_strips_html_from_name(self):
+        req = PresetCreateRequest(name="<b>Bold</b>")
+        assert req.name == "Bold"
+
+    def test_create_request_strips_html_from_description(self):
+        req = PresetCreateRequest(name="Valid", description='<img src=x onerror="alert(1)">')
+        assert "<" not in req.description
+
+    def test_update_request_strips_html(self):
+        req = PresetUpdateRequest(name="<script>x</script>Fine", description="<p>desc</p>")
+        assert req.name == "xFine"
+        assert req.description == "desc"
+
+
+# ---------------------------------------------------------------------------
+# _resolve_preset in jobs.py
+# ---------------------------------------------------------------------------
+
+
+def _make_request(org_id: str | None = "org-1") -> MagicMock:
+    request = MagicMock()
+    request.headers = {"X-Org-Id": org_id} if org_id else {}
+    return request
+
+
+class TestResolvePreset:
+    def test_none_preset_id_returns_none(self, mem_storage):
+        from web.api.routes.jobs import _resolve_preset
+
+        assert _resolve_preset(None, _make_request()) is None
+
+    def test_resolves_params_from_preset(self, mem_storage, monkeypatch):
+        import web.api.org_isolation as iso
+
+        monkeypatch.setattr(iso, "AUTH_ENABLED", False)
+
+        from web.api.routes.jobs import _resolve_preset
+
+        preset = create_preset(
+            "org-1",
+            "Sharp",
+            "",
+            InferenceParamsSchema(despill_strength=0.25, despeckle_size=800),
+            OutputConfigSchema(matte_format="png"),
+            False,
+            None,
+        )
+
+        params, output_config = _resolve_preset(preset.id, _make_request())
+
+        assert params.despill_strength == 0.25
+        assert params.despeckle_size == 800
+        assert output_config.matte_format == "png"
+
+    def test_missing_preset_raises_404(self, mem_storage, monkeypatch):
+        from fastapi import HTTPException
+
+        import web.api.org_isolation as iso
+
+        monkeypatch.setattr(iso, "AUTH_ENABLED", False)
+
+        from web.api.routes.jobs import _resolve_preset
+
+        with pytest.raises(HTTPException) as exc_info:
+            _resolve_preset("nonexistent-id", _make_request())
+        assert exc_info.value.status_code == 404
+
+    def test_preset_params_override_request_defaults(self, mem_storage, monkeypatch):
+        """Params from the preset must win over InferenceParamsSchema defaults."""
+        import web.api.org_isolation as iso
+
+        monkeypatch.setattr(iso, "AUTH_ENABLED", False)
+
+        from web.api.routes.jobs import _resolve_preset
+
+        preset = create_preset(
+            "org-1",
+            "Custom",
+            "",
+            InferenceParamsSchema(despill_strength=0.1, input_is_linear=True),
+            OutputConfigSchema(fg_format="png", comp_enabled=False),
+            False,
+            None,
+        )
+        default_params = InferenceParamsSchema()
+        params, output_config = _resolve_preset(preset.id, _make_request())
+
+        assert params.despill_strength != default_params.despill_strength
+        assert params.input_is_linear is True
+        assert output_config.fg_format == "png"
+        assert output_config.comp_enabled is False

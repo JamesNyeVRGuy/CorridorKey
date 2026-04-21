@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import threading
 import time
 import uuid
@@ -11,7 +12,7 @@ from .schemas import InferenceParamsSchema, OutputConfigSchema, PresetSchema
 logger = logging.getLogger(__name__)
 
 _STORAGE_KEY = "presets"
-_MAX_PRESETS_PER_ORG = 50
+_MAX_PRESETS_PER_ORG = int(os.environ.get("CK_MAX_PRESETS_PER_ORG", "50").strip())
 _lock = threading.Lock()
 
 
@@ -37,7 +38,8 @@ def list_presets(org_id: str | None) -> list[PresetSchema]:
     """Return all presets for an org."""
     if not org_id:
         return []
-    return [PresetSchema(**data) for data in _load_org_presets(org_id).values()]
+    presets = [PresetSchema(**data) for data in _load_org_presets(org_id).values()]
+    return sorted(presets, key=lambda p: (not p.is_default, p.name.lower()))
 
 
 def get_preset(preset_id: str, org_id: str | None) -> PresetSchema | None:

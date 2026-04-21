@@ -20,9 +20,11 @@
 			processed_enabled: true,
 			processed_format: 'exr',
 		}),
+		allowSetDefault = false,
 	}: {
 		params: InferenceParams;
 		outputConfig: OutputConfig;
+		allowSetDefault?: boolean;
 	} = $props();
 
 	function clamp(val: number, min: number, max: number): number {
@@ -40,6 +42,7 @@
 		onApply={applyPreset}
 		currentParams={params}
 		currentOutputConfig={outputConfig}
+		allowSetDefault={allowSetDefault}
 	/>
 
 	<div class="form-section">

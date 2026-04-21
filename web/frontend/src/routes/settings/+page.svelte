@@ -104,7 +104,7 @@
 			<section class="card">
 				<h2 class="card-title mono">DEFAULT PARAMETERS</h2>
 				<p class="card-desc">Pre-fill values for the inference form.</p>
-				<InferenceForm bind:params={$defaultParams} bind:outputConfig={$defaultOutputConfig} />
+				<InferenceForm bind:params={$defaultParams} bind:outputConfig={$defaultOutputConfig} allowSetDefault={true} />
 			</section>
 
 			<!-- Help -->
