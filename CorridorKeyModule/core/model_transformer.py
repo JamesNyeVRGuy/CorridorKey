@@ -10,6 +10,11 @@ import torch.nn.functional as F
 
 logger = logging.getLogger(__name__)
 
+# CNN refiner tiling defaults. The refiner's receptive field is about 65px,
+# so a 128px overlap makes the tiled output mathematically lossless.
+DEFAULT_TILE_SIZE = 512
+DEFAULT_TILE_OVERLAP = 128
+
 
 def _patch_hiera_global_attention(hiera: nn.Module) -> int:
     """Rewrite Hiera global-attention blocks to use FlashAttention-compatible shapes.
@@ -201,6 +206,106 @@ class CNNRefinerModule(nn.Module):
         return self.final(x) * 10.0
 
 
+class TiledCNNRefiner(CNNRefinerModule):
+    """CNN Refiner that processes the input in overlapping tiles.
+
+    Running the refiner at 2048x2048 in one shot peaks the refiner-stage
+    workspace at several GB, which is the OOM risk on 8-12 GB cards. The
+    refiner's receptive field is ~65 px, so processing in 512x512 tiles
+    with 128 px overlap is mathematically lossless: every output pixel
+    sees the same receptive field it would in the single-pass model.
+
+    Blend ramps cost a small one-time allocation per unique tile shape and
+    are cached. Edge tiles that land shorter than ``tile_size`` get their
+    own cached ramp.
+
+    Ported from 99oblivius/CorridorKey-Engine optimized_model.TiledCNNRefiner.
+    """
+
+    def __init__(
+        self,
+        in_channels: int = 7,
+        hidden_channels: int = 64,
+        out_channels: int = 4,
+        tile_size: int = DEFAULT_TILE_SIZE,
+        tile_overlap: int = DEFAULT_TILE_OVERLAP,
+    ) -> None:
+        super().__init__(in_channels, hidden_channels, out_channels)
+        self.tile_size = tile_size
+        self.tile_overlap = tile_overlap
+        self._blend_cache: dict[tuple[int, int], torch.Tensor] = {}
+
+    def _create_blend_weight(
+        self, h: int, w: int, overlap: int, device: torch.device, dtype: torch.dtype
+    ) -> torch.Tensor:
+        """Linear ramp from 0 to 1 over ``overlap`` pixels on every border.
+
+        Returns ``[1, 1, h, w]``. Interior pixels stay at 1.0. Tiles smaller
+        than ``2 * overlap`` in a dimension collapse naturally (both ramps
+        multiply into the same cells).
+        """
+        weight = torch.ones(1, 1, h, w, device=device, dtype=dtype)
+        if overlap <= 0:
+            return weight
+
+        ramp = torch.linspace(0.0, 1.0, overlap, device=device, dtype=dtype)
+        for i in range(overlap):
+            weight[:, :, i, :] *= ramp[i]
+            weight[:, :, h - 1 - i, :] *= ramp[i]
+        for i in range(overlap):
+            weight[:, :, :, i] *= ramp[i]
+            weight[:, :, :, w - 1 - i] *= ramp[i]
+        return weight
+
+    def _process_tile(self, x: torch.Tensor) -> torch.Tensor:
+        """Parent forward, minus the cat step (caller already concatenated)."""
+        feat = self.stem(x)
+        feat = self.res1(feat)
+        feat = self.res2(feat)
+        feat = self.res3(feat)
+        feat = self.res4(feat)
+        return self.final(feat) * 10.0
+
+    def forward(self, img: torch.Tensor, coarse_pred: torch.Tensor) -> torch.Tensor:
+        B, _, H, W = img.shape
+        full_input = torch.cat([img, coarse_pred], dim=1)  # [B, 7, H, W]
+
+        # Small inputs skip the tiling loop entirely.
+        if self.tile_size >= H and self.tile_size >= W:
+            return self._process_tile(full_input)
+
+        stride = self.tile_size - self.tile_overlap
+        out_channels = coarse_pred.shape[1]
+
+        delta_sum = torch.zeros(B, out_channels, H, W, device=img.device, dtype=img.dtype)
+        weight_sum = torch.zeros(B, 1, H, W, device=img.device, dtype=img.dtype)
+
+        for y0 in range(0, H, stride):
+            for x0 in range(0, W, stride):
+                y1 = min(y0 + self.tile_size, H)
+                x1 = min(x0 + self.tile_size, W)
+                # Shift the tile origin when the right / bottom edge is hit
+                # so we always feed a full-size tile when possible.
+                y0_adj = max(0, y1 - self.tile_size)
+                x0_adj = max(0, x1 - self.tile_size)
+
+                tile = full_input[:, :, y0_adj:y1, x0_adj:x1]
+                tile_delta = self._process_tile(tile)
+
+                tile_h, tile_w = tile_delta.shape[2], tile_delta.shape[3]
+                cache_key = (tile_h, tile_w)
+                if cache_key not in self._blend_cache:
+                    self._blend_cache[cache_key] = self._create_blend_weight(
+                        tile_h, tile_w, self.tile_overlap, img.device, img.dtype
+                    )
+                blend_w = self._blend_cache[cache_key]
+
+                delta_sum[:, :, y0_adj:y1, x0_adj:x1] += tile_delta * blend_w
+                weight_sum[:, :, y0_adj:y1, x0_adj:x1] += blend_w
+
+        return delta_sum / weight_sum.clamp(min=1e-6)
+
+
 class GreenFormer(nn.Module):
     def __init__(
         self,
@@ -210,6 +315,9 @@ class GreenFormer(nn.Module):
         use_refiner: bool = True,
         patch_hiera_sdpa: bool = True,
         cache_cleanup: bool = True,
+        tiled_refiner: bool = False,
+        tile_size: int = DEFAULT_TILE_SIZE,
+        tile_overlap: int = DEFAULT_TILE_OVERLAP,
     ) -> None:
         super().__init__()
         self._cache_cleanup = cache_cleanup
@@ -261,7 +369,17 @@ class GreenFormer(nn.Module):
         # In Channels: 3 (RGB) + 4 (Coarse Pred) = 7
         self.use_refiner = use_refiner
         if self.use_refiner:
-            self.refiner = CNNRefinerModule(in_channels=7, hidden_channels=64, out_channels=4)
+            if tiled_refiner:
+                self.refiner = TiledCNNRefiner(
+                    in_channels=7,
+                    hidden_channels=64,
+                    out_channels=4,
+                    tile_size=tile_size,
+                    tile_overlap=tile_overlap,
+                )
+                logger.info("Refiner: tiled (tile_size=%d, overlap=%d)", tile_size, tile_overlap)
+            else:
+                self.refiner = CNNRefinerModule(in_channels=7, hidden_channels=64, out_channels=4)
         else:
             self.refiner = None
             logger.info("Refiner module DISABLED (backbone-only mode)")

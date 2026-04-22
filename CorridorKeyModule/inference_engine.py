@@ -65,11 +65,13 @@ class CorridorKeyEngine:
         use_refiner: bool = True,
         mixed_precision: bool = True,
         model_precision: torch.dtype = torch.float32,
+        tiled_refiner: bool | str = "auto",
     ) -> None:
         self.device = torch.device(device)
         self.img_size = img_size
         self.checkpoint_path = checkpoint_path
         self.use_refiner = use_refiner
+        self._tiled_refiner = self._resolve_tiled_refiner(tiled_refiner)
         self.compiled = False
 
         self.mean = torch.tensor([0.485, 0.456, 0.406], dtype=model_precision, device=self.device)
@@ -118,6 +120,30 @@ class CorridorKeyEngine:
         elif sys.platform == "linux" or sys.platform == "win32":
             self._compile()
 
+    def _resolve_tiled_refiner(self, preference: bool | str) -> bool:
+        """Decide whether to build a TiledCNNRefiner vs the single-pass refiner.
+
+        Resolution order: CORRIDORKEY_TILED_REFINER env var > explicit kwarg.
+        For 'auto' on CUDA devices the refiner is tiled only when total VRAM
+        is under ~13 GB, which catches 8 / 10 / 12 GB cards and spares 16 GB+
+        cards the (mild) per-frame overhead of the tiling loop.
+        """
+        env = os.environ.get("CORRIDORKEY_TILED_REFINER", "").strip().lower()
+        if env in ("1", "true", "on"):
+            return True
+        if env in ("0", "false", "off"):
+            return False
+
+        if preference == "auto":
+            if self.device.type != "cuda":
+                return False
+            try:
+                total = torch.cuda.get_device_properties(self.device).total_memory
+                return total < 13 * (1024**3)
+            except Exception:
+                return False
+        return bool(preference)
+
     def _install_refiner_scale_hook(self) -> None:
         """Register a persistent forward hook that scales refiner output.
 
@@ -141,7 +167,10 @@ class CorridorKeyEngine:
         logger.info("Loading CorridorKey from %s", self.checkpoint_path)
         # Initialize Model (Hiera Backbone)
         model = GreenFormer(
-            encoder_name="hiera_base_plus_224.mae_in1k_ft_in1k", img_size=self.img_size, use_refiner=self.use_refiner
+            encoder_name="hiera_base_plus_224.mae_in1k_ft_in1k",
+            img_size=self.img_size,
+            use_refiner=self.use_refiner,
+            tiled_refiner=self._tiled_refiner,
         )
         model = model.to(self.device)
         model.eval()
