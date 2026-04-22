@@ -538,6 +538,27 @@ def _check_nvidia_available(gpu_index: int, min_free_gb: float) -> tuple[bool, s
     """
     # Try NVIDIA
     try:
+        query = _query_nvidia_smi(gpu_index)
+
+        if query is None:
+            return None
+
+        return _parse_nvidia_availability(query, gpu_index, min_free_gb)
+    # Catch known bad nvidia-smi output
+    except ValueError as e:
+        if "[N/A]" in str(e):
+            logger.debug("bad nvidia-smi output, continuing to fallbacks")
+        else:
+            logger.debug("Unexpected ValueError trying to parse nvidia-smi output", exc_info=True)
+    # Catch all exceptions and log but continue to fallbacks
+    except Exception:
+        logger.debug("Unexpected failure trying to check GPU usage", exc_info=True)
+
+    return None
+
+
+def _query_nvidia_smi(gpu_index: int) -> str | None:
+    try:
         result = subprocess_run(
             [
                 "nvidia-smi",
@@ -550,51 +571,53 @@ def _check_nvidia_available(gpu_index: int, min_free_gb: float) -> tuple[bool, s
             timeout=5,
         )
         if result.returncode == 0:
-            parts = [p.strip() for p in result.stdout.strip().split(",")]
-            if len(parts) >= 4:
-                raw_util = float(parts[0])
-                free_gb = float(parts[1]) / 1024
-
-                def parse_power(value: str) -> float | None:
-                    try:
-                        return float(value)
-                    except (ValueError, TypeError):
-                        return None
-
-                power_draw = parse_power(parts[2])
-                power_limit = parse_power(parts[3])
-
-                # Fallback to raw_util if power_limit return is bad
-                if power_draw is not None and power_limit is not None and power_limit > 0:
-                    # raw_util is insufficient
-                    #  Measures X% of time at least one kernel ran during last polling window
-
-                    # (power_draw / power_limit) multiplier to calculate effective usage
-                    #  This is more accurate than other methods like measuring clock speed.
-                    eff_util = raw_util * (power_draw / power_limit)
-                    eff_util = min(eff_util, 100.0)
-                else:
-                    eff_util = raw_util
-
-                if eff_util > 50:
-                    return False, f"GPU {gpu_index} busy ({eff_util:.0f}% utilization)"
-                if min_free_gb > 0 and free_gb < min_free_gb:
-                    return False, f"GPU {gpu_index} low VRAM ({free_gb:.1f}GB free, need {min_free_gb:.1f}GB)"
-                return True, "ok"
-    # Expected failures, continue to next fallback
+            return result.stdout
+    # Expected failures, likely no nvidia-smi, return None
     except (FileNotFoundError, TimeoutExpired):
         pass
-    # Catch known bad nvidia-smi output
-    except ValueError as e:
-        if "[N/A]" in str(e):
-            logger.debug("bad nvidia-smi output, continuing to fallbacks")
-        else:
-            logger.debug("Unexpected ValueError trying to check GPU usage", exc_info=True)
-    # Catch all exceptions and log but continue to fallbacks
-    except Exception:
-        logger.debug("Unexpected failure trying to check GPU usage", exc_info=True)
 
     return None
+
+
+def _parse_nvidia_availability(stdout: str, gpu_index: int, min_free_gb: float) -> tuple[bool, str] | None:
+    """Parses nvidia-smi output provided by _check_nvidia_available
+
+    Returns:
+        (available, reason) — True if GPU can accept work, else False with reason.
+    """
+    parts = [p.strip() for p in stdout.strip().split(",")]
+    if len(parts) < 4:
+        return None
+    
+    raw_util = float(parts[0])
+    free_gb = float(parts[1]) / 1024
+
+    def parse_power(value: str) -> float | None:
+        try:
+            return float(value)
+        except (ValueError, TypeError):
+            return None
+
+    power_draw = parse_power(parts[2])
+    power_limit = parse_power(parts[3])
+
+    # Fallback to raw_util if power_limit or power_draw return is bad
+    if power_draw is not None and power_limit is not None and power_limit > 0:
+        # raw_util is insufficient
+        #  Measures X% of time at least one kernel ran during last polling window
+
+        # (power_draw / power_limit) multiplier to calculate effective usage
+        #  This is more accurate than other methods like measuring clock speed.
+        eff_util = raw_util * (power_draw / power_limit)
+        eff_util = min(eff_util, 100.0)
+    else:
+        eff_util = raw_util
+
+    if eff_util > 50:
+        return False, f"GPU {gpu_index} busy ({eff_util:.0f}% utilization)"
+    if min_free_gb > 0 and free_gb < min_free_gb:
+        return False, f"GPU {gpu_index} low VRAM ({free_gb:.1f}GB free, need {min_free_gb:.1f}GB)"
+    return True, "ok"
 
 
 def _check_amd_available(gpu_index: int, min_free_gb: float) -> tuple[bool, str] | None:
