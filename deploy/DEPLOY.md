@@ -128,6 +128,89 @@ This creates the first `platform_admin` user via GoTrue's admin API, bypassing t
 3. Share the link with your team
 4. Approve users in the Admin → Users → Pending section
 
+## Split-Host File Transfers (Cloudflare Bypass)
+
+Cloudflare's free plan caps request bodies at 100 MB, which is lower than
+a typical clip. The deploy supports routing `/api/upload/*` and
+`/api/preview/*` through a dedicated hostname that is excluded from the
+proxied CDN (DNS-only, or a separate origin rule), while keeping the main
+WebUI behind Cloudflare.
+
+### When to enable
+
+Enable this if you (a) front the main site with Cloudflare or any CDN that
+imposes a request body cap, and (b) expect uploads or downloads larger than
+that cap. If you serve everything from one origin with no CDN cap, leave
+`CKWEB_FILE_BASE` unset — the frontend and backend both fall back to
+same-origin.
+
+### Configuration
+
+1. Pick a hostname (example: `files.corridorkey.cloud`) and create a DNS
+   record for it pointing at the same server. In Cloudflare, set this
+   record to **DNS only** (gray cloud) so the upload bypasses the proxy.
+2. Set `CKWEB_FILE_BASE` in `deploy/.env`:
+   ```
+   CKWEB_FILE_BASE=files.corridorkey.cloud
+   ```
+   Use the hostname only, with no scheme and no trailing slash. The
+   frontend defaults to `https://` if no scheme is present.
+3. Rebuild the web image. The value is a Vite build-arg and gets baked
+   into `import.meta.env.CKWEB_FILE_BASE` at `npm run build` time, so the
+   container image must be rebuilt whenever you change `CKWEB_FILE_BASE`.
+   Pulling `ghcr.io/jamesnyevrguy/corridorkey-web:latest` gets an image
+   that was built with the CI default (`files.corridorkey.cloud`); any
+   other hostname requires a local build.
+4. Restart the Caddy container. The provided `Caddyfile` adds a second
+   vhost for `{$CKWEB_FILE_BASE}` that only proxies `/api/upload/*` and
+   `/api/preview/*` to the backend and 404s on every other path.
+
+### Behavior after enabling
+
+- The SPA issues uploads and preview/download requests directly to the
+  file host (cross-origin). The main page still loads from the primary
+  host.
+- CORS is handled automatically at startup: the file origin is appended
+  to `allow_origins` so preflights succeed without extra config.
+- Authentication travels as a Bearer token in the `Authorization` header
+  (uploads) or as a query-string `token=` (preview URLs). No cookies
+  means no SameSite interactions with the split origin.
+
+### WAF / bot-rule caveat
+
+WAF rules, bot-fight mode, and any custom page rules configured on the
+primary Cloudflare zone do **not** apply to the file host, because the
+file host bypasses the proxy. If you rely on Cloudflare for abuse
+protection, configure equivalent rules on the file zone or protect the
+upstream directly (fail2ban, application-layer rate limits, etc.).
+
+### Tuning upload size
+
+Two env vars control upload behavior on the backend:
+
+- `CK_MAX_UPLOAD_MB` — hard cap per upload. Default 10240 (10 GB).
+- `CK_CHUNK_SIZE_MB` — streaming read chunk size. Default 10. Larger
+  values use more memory per in-flight request.
+
+Both are forwarded into the `corridorkey-web` container by
+`docker-compose.web.yml` and read at import time by
+`web/api/routes/upload.py`.
+
+## Custom Domain and CORS
+
+`CK_SITE_URL` drives most of the "what is my site's URL" logic (password
+reset links, invite emails, OAuth redirects). Set it once in `.env`:
+
+```
+CK_SITE_URL=https://vfx.mystudio.com
+```
+
+The CORS origin list is derived from `CK_SITE_URL` automatically, plus
+`http://localhost:3000` and `http://127.0.0.1:3000` for local dev. If you
+need a different allow-list, set `CK_CORS_ORIGINS` explicitly as a
+comma-separated list; it overrides the derived default. The
+`CKWEB_FILE_BASE` value is always appended if set.
+
 ## Docker Swarm Deployment
 
 The `prod-up.sh` and `prod-down.sh` scripts use `docker compose`, not Swarm.

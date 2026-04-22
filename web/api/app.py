@@ -29,6 +29,44 @@ logger = logging.getLogger(__name__)
 _app_start_time = 0.0
 
 
+def _resolve_cors_origins() -> list[str]:
+    """Build the CORS allow_origins list from environment.
+
+    Precedence:
+      1. CK_CORS_ORIGINS (comma-separated) overrides everything else.
+      2. Otherwise derive from CK_SITE_URL / SITE_URL plus localhost variants,
+         so self-hosters on a custom domain work without extra CORS config.
+      3. If CKWEB_FILE_BASE is set, its origin is appended (https:// assumed
+         when it is a bare hostname) so cross-origin file-transfer preflights
+         to the split host succeed.
+
+    Empty and duplicate entries are dropped; order is preserved.
+    """
+    raw = os.environ.get("CK_CORS_ORIGINS", "").strip()
+    if raw:
+        candidates = [o.strip() for o in raw.split(",") if o.strip()]
+    else:
+        site_url = (
+            os.environ.get("CK_SITE_URL", "").strip()
+            or os.environ.get("SITE_URL", "").strip()
+            or "https://corridorkey.cloud"
+        ).rstrip("/")
+        candidates = [site_url, "http://localhost:3000", "http://127.0.0.1:3000"]
+
+    file_base = os.environ.get("CKWEB_FILE_BASE", "").strip().rstrip("/")
+    if file_base:
+        file_origin = file_base if "://" in file_base else f"https://{file_base}"
+        candidates.append(file_origin)
+
+    seen: set[str] = set()
+    result: list[str] = []
+    for o in candidates:
+        if o and o not in seen:
+            seen.add(o)
+            result.append(o)
+    return result
+
+
 def _track_consumed_credits(queue) -> None:
     """Track GPU-seconds consumed by the most recently completed job (CRKY-6)."""
     import time as _t
@@ -285,7 +323,6 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # Auth middleware (must be added before GZip so it runs first)
     from .auth import AUTH_ENABLED, JWT_SECRET, AuthMiddleware
 
     if AUTH_ENABLED and not JWT_SECRET:
@@ -295,33 +332,22 @@ def create_app() -> FastAPI:
             "to the same value as your Supabase JWT_SECRET."
         )
 
-    # Middleware execution order (Starlette LIFO: last added = outermost):
-    # Request → RateLimit → Auth → GZip → CORS → APIVersion → Route
-    # RateLimit must be outermost (added last) but needs user context from Auth.
-    # Since Auth runs after RateLimit in LIFO, we can't get user in RateLimit.
+    # Middleware order (Starlette is LIFO: last added runs first on inbound).
+    # Inbound request:  APIVersion -> CORS -> GZip -> Auth -> RateLimit -> Route
+    # Outbound response: reverse of the above.
     #
-    # Solution: RateLimit added FIRST (innermost), Auth second, GZip last.
-    # Execution: GZip → CORS → APIVersion→ Auth (injects user) → RateLimit (reads user) → Route
+    # RateLimit reads user context injected by Auth, so Auth must run before
+    # RateLimit on the inbound path. Add RateLimit first (innermost), then
+    # Auth. GZip, CORS, and APIVersion are added afterwards.
     from fastapi.middleware.cors import CORSMiddleware
 
     from .rate_limit import RateLimitMiddleware
 
-    app.add_middleware(RateLimitMiddleware)  # innermost — runs after auth
-    app.add_middleware(AuthMiddleware)  # middle — injects user context
-    app.add_middleware(GZipMiddleware, minimum_size=1000)  # outermost — compression
-    cors_origins = [
-        origin.strip()
-        for origin in os.environ.get(
-            "CK_CORS_ORIGINS",
-            "https://corridorkey.cloud,http://localhost:3000,http://127.0.0.1:3000",
-        ).split(",")
-        if origin.strip()
-    ]
-    file_base = os.environ.get("CKWEB_FILE_BASE", "").strip().rstrip("/")
-    if file_base:
-        file_origin = file_base if "://" in file_base else f"https://{file_base}"
-        if file_origin not in cors_origins:
-            cors_origins.append(file_origin)
+    app.add_middleware(RateLimitMiddleware)
+    app.add_middleware(AuthMiddleware)
+    app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+    cors_origins = _resolve_cors_origins()
     if cors_origins:
         app.add_middleware(
             CORSMiddleware,
