@@ -588,7 +588,7 @@ def _parse_nvidia_availability(stdout: str, gpu_index: int, min_free_gb: float) 
     parts = [p.strip() for p in stdout.strip().split(",")]
     if len(parts) < 4:
         return None
-    
+
     raw_util = float(parts[0])
     free_gb = float(parts[1]) / 1024
 
