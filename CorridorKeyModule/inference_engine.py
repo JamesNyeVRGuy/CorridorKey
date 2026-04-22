@@ -90,6 +90,7 @@ class CorridorKeyEngine:
 
         self._is_rocm = hasattr(torch.version, "hip") and torch.version.hip
         self.model = self._load_model()
+        self._install_refiner_scale_hook()
 
         # torch.compile needs: cl.exe (Windows), gcc (Linux), and Triton.
         # Check prerequisites and skip with a helpful message if missing.
@@ -116,6 +117,25 @@ class CorridorKeyEngine:
             logger.info("Skipping torch.compile (%s)", skip_reason)
         elif sys.platform == "linux" or sys.platform == "win32":
             self._compile()
+
+    def _install_refiner_scale_hook(self) -> None:
+        """Register a persistent forward hook that scales refiner output.
+
+        The hook multiplies by a 1-element device tensor kept on ``self``.
+        Per-frame scale changes go through ``_refiner_scale_t.fill_()`` so
+        the graph shape never changes under torch.compile or CUDA graphs.
+        """
+        self._refiner_scale_t = torch.ones(1, device=self.device, dtype=self.model_precision)
+        self._refiner_hook_handle = None
+        if self.model.refiner is None:
+            return
+
+        scale_tensor = self._refiner_scale_t  # capture the tensor, not self
+
+        def _refiner_scale_hook(module, input, output):
+            return output * scale_tensor
+
+        self._refiner_hook_handle = self.model.refiner.register_forward_hook(_refiner_scale_hook)
 
     def _load_model(self) -> GreenFormer:
         logger.info("Loading CorridorKey from %s", self.checkpoint_path)
@@ -459,23 +479,17 @@ class CorridorKeyEngine:
         del image, mask_linear
 
         # 5. Inference
-        # Hook for Refiner Scaling
-        handle = None
-        if refiner_scale != 1.0 and self.model.refiner is not None:
-
-            def scale_hook(module, input, output):
-                return output * refiner_scale
-
-            handle = self.model.refiner.register_forward_hook(scale_hook)
+        # Refiner scaling: update the persistent device tensor in place. The
+        # hook registered in __init__ always multiplies by this tensor, so
+        # there are no graph breaks or per-frame hook register/remove churn.
+        if self.model.refiner is not None:
+            self._refiner_scale_t.fill_(refiner_scale)
 
         with torch.autocast(device_type=self.device.type, dtype=torch.float16, enabled=self.mixed_precision):
             prediction = self.model(inp_t)
 
         # Free up unused VRAM in order to keep peak usage down and avoid OOM errors
         del inp_t
-
-        if handle:
-            handle.remove()
 
         if post_process_on_gpu:
             out = self._postprocess_torch(
