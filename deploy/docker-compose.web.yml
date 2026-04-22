@@ -64,7 +64,9 @@ services:
       - CK_SMTP_FROM_EMAIL=${SMTP_ADMIN_EMAIL:-}
       - CK_SMTP_FROM_NAME=${SMTP_SENDER_NAME:-CorridorKey}
       - CK_SITE_URL=${SITE_URL:-https://corridorkey.cloud}
-      - CKWEB_FILE_BASE=${CKWEB_FILE_BASE:?Set CKWEB_FILE_BASE in .env}
+      - CKWEB_FILE_BASE=${CKWEB_FILE_BASE-}
+      - CK_MAX_UPLOAD_MB=${CK_MAX_UPLOAD_MB:-10240}
+      - CK_CHUNK_SIZE_MB=${CK_CHUNK_SIZE_MB:-10}
     volumes:
       - ${CK_PROJECTS_DIR:-./Projects}:/app/Projects
       - ${CK_WEIGHTS_DIR:-./weights}/corridorkey:/app/CorridorKeyModule/checkpoints

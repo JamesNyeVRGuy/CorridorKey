@@ -36,15 +36,19 @@
 
 # Dedicated file transfer hosts (uploads + previews/downloads).
 # Example: CKWEB_FILE_BASE=files.corridorkey.cloud
+#
+# Use `handle` (not `handle_path`) so the /api/... prefix is preserved.
+# `handle_path` would strip the literal matcher prefix and the FastAPI
+# routes would stop matching.
 {$CKWEB_FILE_BASE} {
-	handle_path /api/upload* {
+	handle /api/upload/* {
 		reverse_proxy localhost:3000 {
 			header_up X-Forwarded-Proto {scheme}
 			header_up X-Real-IP {remote_host}
 		}
 	}
-	
-	handle_path /api/preview* {
+
+	handle /api/preview/* {
 		reverse_proxy localhost:3000 {
 			header_up X-Forwarded-Proto {scheme}
 			header_up X-Real-IP {remote_host}
