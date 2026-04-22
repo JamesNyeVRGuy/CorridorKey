@@ -37,7 +37,7 @@ async function handle401(method: string, path: string, opts: RequestInit): Promi
 	return fetch(`${BASE}${path}`, { ...opts, headers: retryHeaders });
 }
 
-async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+async function request<T>(method: string, path: string, body?: unknown, noContent?: boolean): Promise<T> {
 	const headers: Record<string, string> = { 'Content-Type': 'application/json' };
 	await attachAuth(headers);
 
@@ -58,6 +58,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 		const detail = await res.json().catch(() => ({ detail: res.statusText }));
 		throw new Error(detail.detail || res.statusText);
 	}
+	if (noContent || res.status === 204) return undefined as T;
 	return res.json();
 }
 
@@ -204,6 +205,23 @@ export interface VRAMInfo {
 	free: number;
 	name: string;
 	available: boolean;
+}
+
+export interface Preset {
+	id: string;
+	name: string;
+	description: string;
+	scope: string;
+	org_id: string | null;
+	params: InferenceParams;
+	output_config: OutputConfig;
+	is_default: boolean;
+	created_by: string | null;
+	created_at: number;
+}
+
+export interface PresetListResponse {
+	presets: Preset[];
 }
 
 export interface Folder {
@@ -448,5 +466,14 @@ export const api = {
 			request<unknown>('POST', `/api/system/claim-delay?seconds=${seconds}`),
 		getScheduleTz: () =>
 			request<{ timezone: string; abbreviation: string; server_time: string }>('GET', '/api/system/schedule-tz')
+	},
+	presets: {
+		list: () => request<PresetListResponse>('GET', '/api/presets'),
+		get: (id: string) => request<Preset>('GET', `/api/presets/${encodeURIComponent(id)}`),
+		create: (data: { name: string; description?: string; params: InferenceParams; output_config: OutputConfig; is_default?: boolean }) =>
+			request<Preset>('POST', '/api/presets', data),
+		update: (id: string, data: { name?: string; description?: string; params?: InferenceParams; output_config?: OutputConfig; is_default?: boolean }) =>
+			request<Preset>('PATCH', `/api/presets/${encodeURIComponent(id)}`, data),
+		delete: (id: string) => request<void>('DELETE', `/api/presets/${encodeURIComponent(id)}`, undefined, true)
 	}
 };

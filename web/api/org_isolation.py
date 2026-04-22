@@ -103,6 +103,23 @@ def resolve_node_clips_dir(node_org_id: str | None) -> str:
     return org_dir
 
 
+def resolve_org_id(request: Request) -> str | None:
+    """Resolve the active org ID for the current request.
+
+    Returns the org ID from the X-Org-Id header, or falls back to the user's
+    first org. Returns None when auth is disabled or the user has no orgs.
+    """
+    user = get_current_user(request)
+    if not user:
+        return None
+    store = get_org_store()
+    active_org = request.headers.get("X-Org-Id", "").strip()
+    if active_org and (user.is_admin or store.is_member(active_org, user.user_id)):
+        return active_org
+    user_orgs = store.list_user_orgs(user.user_id)
+    return user_orgs[0].org_id if user_orgs else None
+
+
 def validate_clip_access(request: Request, clip_root_path: str) -> bool:
     """Check that a clip's path is within the user's accessible org directories.
 

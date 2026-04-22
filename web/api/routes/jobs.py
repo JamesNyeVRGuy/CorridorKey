@@ -36,6 +36,18 @@ MAX_AUTO_SHARDS = int(os.environ.get("CK_MAX_AUTO_SHARDS", "10"))
 router = APIRouter(prefix="/api/jobs", tags=["jobs"], dependencies=[Depends(require_member)])
 
 
+def _resolve_preset(preset_id: str | None, request: Request) -> tuple[InferenceParamsSchema, OutputConfigSchema] | None:
+    if not preset_id:
+        return None
+    from ..org_isolation import resolve_org_id
+    from ..presets import get_preset
+
+    preset = get_preset(preset_id, resolve_org_id(request))
+    if not preset:
+        raise HTTPException(status_code=404, detail=f"Preset '{preset_id}' not found")
+    return preset.params, preset.output_config
+
+
 def _check_maintenance() -> None:
     """Reject job submissions during maintenance mode."""
     from .admin import is_maintenance_active
@@ -210,6 +222,10 @@ def submit_inference(req: InferenceJobRequest, request: Request):
     _check_maintenance()
     from ..org_isolation import resolve_clips_dir
 
+    resolved = _resolve_preset(req.preset_id, request)
+    params = resolved[0] if resolved else req.params
+    output_config = resolved[1] if resolved else req.output_config
+
     queue = get_queue()
     service = get_service()
     clips = service.scan_clips(resolve_clips_dir(request))
@@ -225,8 +241,8 @@ def submit_inference(req: InferenceJobRequest, request: Request):
             job_type=JobType.INFERENCE,
             clip_name=clip_name,
             params={
-                "inference_params": req.params.model_dump(),
-                "output_config": req.output_config.model_dump(),
+                "inference_params": params.model_dump(),
+                "output_config": output_config.model_dump(),
                 "frame_range": list(req.frame_range) if req.frame_range else None,
             },
         )
@@ -717,6 +733,10 @@ def submit_pipeline(req: PipelineJobRequest, request: Request):
     _check_maintenance()
     from ..org_isolation import resolve_clips_dir
 
+    resolved = _resolve_preset(req.preset_id, request)
+    params = resolved[0] if resolved else req.params
+    output_config = resolved[1] if resolved else req.output_config
+
     queue = get_queue()
     service = get_service()
     clips = service.scan_clips(resolve_clips_dir(request))
@@ -726,8 +746,8 @@ def submit_pipeline(req: PipelineJobRequest, request: Request):
     pipeline_params = {
         "pipeline": True,
         "alpha_method": req.alpha_method,
-        "inference_params": req.params.model_dump(),
-        "output_config": req.output_config.model_dump(),
+        "inference_params": params.model_dump(),
+        "output_config": output_config.model_dump(),
     }
 
     submitted = []
