@@ -209,8 +209,10 @@ class GreenFormer(nn.Module):
         img_size: int = 512,
         use_refiner: bool = True,
         patch_hiera_sdpa: bool = True,
+        cache_cleanup: bool = True,
     ) -> None:
         super().__init__()
+        self._cache_cleanup = cache_cleanup
 
         # --- Encoder ---
         # Load Pretrained Hiera
@@ -319,6 +321,13 @@ class GreenFormer(nn.Module):
         alpha_logits = self.alpha_decoder(features)  # [B, 1, H/4, W/4]
         fg_logits = self.fg_decoder(features)  # [B, 3, H/4, W/4]
 
+        # Encoder pyramid is no longer needed. Free it before the refiner
+        # allocates its own workspace: on 2K+ inputs this is the difference
+        # between a 12GB card fitting the clip and OOMing.
+        del features
+        if self._cache_cleanup and x.is_cuda:
+            torch.cuda.empty_cache()
+
         # Upsample to full resolution (Bilinear)
         # These are the "Coarse" LOGITS
         alpha_logits_up = F.interpolate(alpha_logits, size=input_size, mode="bilinear", align_corners=False)
@@ -350,6 +359,13 @@ class GreenFormer(nn.Module):
         else:
             # Zero Deltas
             delta_logits = torch.zeros_like(coarse_pred)
+
+        # Refiner inputs no longer needed. Free before the final residual
+        # plus sigmoid so their workspace doesn't pile up alongside the
+        # refiner's intermediate activations.
+        del alpha_coarse, fg_coarse, coarse_pred
+        if self._cache_cleanup and x.is_cuda:
+            torch.cuda.empty_cache()
 
         delta_alpha = delta_logits[:, 0:1]
         delta_fg = delta_logits[:, 1:4]
