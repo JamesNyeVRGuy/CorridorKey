@@ -544,12 +544,9 @@ def _check_nvidia_available(gpu_index: int, min_free_gb: float) -> tuple[bool, s
             return None
 
         return _parse_nvidia_availability(query, gpu_index, min_free_gb)
-    # Catch known bad nvidia-smi output
-    except ValueError as e:
-        if "[N/A]" in str(e):
-            logger.debug("bad nvidia-smi output, continuing to fallbacks")
-        else:
-            logger.debug("Unexpected ValueError trying to parse nvidia-smi output", exc_info=True)
+    # Expected failures, likely no nvidia-smi, return None
+    except (FileNotFoundError, TimeoutExpired):
+        pass
     # Catch all exceptions and log but continue to fallbacks
     except Exception:
         logger.debug("Unexpected failure trying to check GPU usage", exc_info=True)
@@ -558,23 +555,19 @@ def _check_nvidia_available(gpu_index: int, min_free_gb: float) -> tuple[bool, s
 
 
 def _query_nvidia_smi(gpu_index: int) -> str | None:
-    try:
-        result = subprocess_run(
-            [
-                "nvidia-smi",
-                f"--id={gpu_index}",
-                "--query-gpu=utilization.gpu,memory.free,power.draw,power.limit",
-                "--format=csv,nounits,noheader",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        if result.returncode == 0:
-            return result.stdout
-    # Expected failures, likely no nvidia-smi, return None
-    except (FileNotFoundError, TimeoutExpired):
-        pass
+    result = subprocess_run(
+        [
+            "nvidia-smi",
+            f"--id={gpu_index}",
+            "--query-gpu=utilization.gpu,memory.free,power.draw,power.limit",
+            "--format=csv,nounits,noheader",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=5,
+    )
+    if result.returncode == 0:
+        return result.stdout
 
     return None
 
@@ -589,17 +582,22 @@ def _parse_nvidia_availability(stdout: str, gpu_index: int, min_free_gb: float) 
     if len(parts) < 4:
         return None
 
-    raw_util = float(parts[0])
-    free_gb = float(parts[1]) / 1024
-
-    def parse_power(value: str) -> float | None:
+    def parse_part(value: str) -> float | None:
         try:
             return float(value)
         except (ValueError, TypeError):
             return None
 
-    power_draw = parse_power(parts[2])
-    power_limit = parse_power(parts[3])
+    raw_util = parse_part(parts[0])
+    free_gb = parse_part(parts[1])
+
+    if raw_util is None or free_gb is None:
+        return None
+
+    free_gb /= 1024
+
+    power_draw = parse_part(parts[2])
+    power_limit = parse_part(parts[3])
 
     # Fallback to raw_util if power_limit or power_draw return is bad
     if power_draw is not None and power_limit is not None and power_limit > 0:
