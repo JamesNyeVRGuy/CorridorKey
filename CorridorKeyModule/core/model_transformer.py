@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import types
 
 import timm
 import torch
@@ -8,6 +9,64 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 logger = logging.getLogger(__name__)
+
+
+def _patch_hiera_global_attention(hiera: nn.Module) -> int:
+    """Rewrite Hiera global-attention blocks to use FlashAttention-compatible shapes.
+
+    Hiera's MaskUnitAttention produces Q/K/V with shape
+    ``[B, heads, num_windows, N, head_dim]``. When ``num_windows == 1``
+    (global attention in Stages 2-3), this 5-D non-contiguous tensor is
+    passed to ``F.scaled_dot_product_attention``. PyTorch's FlashAttention
+    kernel requires 4-D contiguous input and silently falls back to the
+    math backend, which materialises the full N x N attention matrix and
+    causes OOM on smaller GPUs.
+
+    For blocks where ``use_mask_unit_attn`` is False, replace ``forward``
+    with an equivalent implementation that skips the num_windows dim and
+    makes Q/K/V contiguous. Math is identical; only the SDPA kernel
+    dispatch changes. Returns the number of blocks patched.
+
+    Ported from 99oblivius/CorridorKey-Engine
+    (CorridorKeyModule/core/optimized_model.py:_patch_hiera_global_attention).
+    """
+    patched = 0
+    blocks = getattr(hiera, "blocks", None)
+    if blocks is None:
+        return 0
+
+    for blk in blocks:
+        attn = getattr(blk, "attn", None)
+        if attn is None or getattr(attn, "use_mask_unit_attn", True):
+            continue  # windowed attention is already FlashAttention-friendly
+
+        def _make_patched_forward(original_attn: nn.Module) -> types.MethodType:
+            def _patched_forward(self: nn.Module, x: torch.Tensor) -> torch.Tensor:
+                B, N, _ = x.shape
+                qkv = self.qkv(x)
+                qkv = qkv.reshape(B, N, 3, self.heads, self.head_dim)
+                qkv = qkv.permute(2, 0, 3, 1, 4)  # [3, B, heads, N, head_dim]
+                q, k, v = qkv.unbind(0)
+
+                if self.q_stride > 1:
+                    q = q.view(B, self.heads, self.q_stride, -1, self.head_dim).amax(dim=2)
+
+                q = q.contiguous()
+                k = k.contiguous()
+                v = v.contiguous()
+
+                x = F.scaled_dot_product_attention(q, k, v)
+
+                x = x.transpose(1, 2).reshape(B, -1, self.dim_out)
+                x = self.proj(x)
+                return x
+
+            return types.MethodType(_patched_forward, original_attn)
+
+        attn.forward = _make_patched_forward(attn)
+        patched += 1
+
+    return patched
 
 
 class MLP(nn.Module):
@@ -149,6 +208,7 @@ class GreenFormer(nn.Module):
         in_channels: int = 4,
         img_size: int = 512,
         use_refiner: bool = True,
+        patch_hiera_sdpa: bool = True,
     ) -> None:
         super().__init__()
 
@@ -166,6 +226,15 @@ class GreenFormer(nn.Module):
         # Patch First Layer for 4 channels
         if in_channels != 3:
             self._patch_input_layer(in_channels)
+
+        # Enable FlashAttention on Hiera's global-attention blocks.
+        if patch_hiera_sdpa:
+            try:
+                hiera_root = self.encoder.model if hasattr(self.encoder, "model") else self.encoder
+                patched = _patch_hiera_global_attention(hiera_root)
+                logger.info("Patched Hiera global attention for FlashAttention SDPA (%d blocks)", patched)
+            except Exception:
+                logger.warning("Hiera SDPA patch failed, continuing with default attention", exc_info=True)
 
         # Get feature info
         # Verified Hiera Base Plus channels: [112, 224, 448, 896]
