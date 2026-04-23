@@ -272,10 +272,10 @@ def login_proxy(req: LoginRequest):
         # If email not confirmed then resend the OTP email. This is a common support issue and better UX
         # than making users figure out they need to go check their email and click the link before logging in.
         if "email not confirmed" in desc:
-
             otp_email_sent = False
             try:
                 from ..email import send_approval_otp_email
+
                 otp_email_sent = send_approval_otp_email(req.email)
             except Exception:
                 logger.exception("send_approval_otp_email: email send failed for %s", req.email)
