@@ -54,17 +54,37 @@ def setup_rocm_env() -> None:
         logger.warning("pytorch-rocm-gtt is installed but patch() failed", exc_info=True)
 
 
+def _prepare_rocm_runtime() -> bool:
+    """Apply ROCm runtime tweaks before probing torch backends.
+
+    Returns True when the current host looks like a ROCm system. ROCm uses
+    torch.cuda as its PyTorch backend, so this just makes sure the runtime is
+    configured before we ask torch whether CUDA is available.
+    """
+    rocm = is_rocm_system()
+    if rocm:
+        setup_rocm_env()
+    return rocm
+
+
 import torch  # noqa: E402
 
 
 def detect_best_device() -> str:
     """Auto-detect best available device: CUDA > MPS > CPU."""
+    rocm = _prepare_rocm_runtime()
     if torch.cuda.is_available():
         device = "cuda"
     elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
         device = "mps"
     else:
         device = "cpu"
+    if rocm and device == "cpu":
+        logger.warning(
+            "ROCm runtime detected, but torch.cuda.is_available() is False; falling back to CPU. "
+            "Likely causes: ROCm torch wheel not installed in this environment, or container missing AMD device "
+            "passthrough (/dev/kfd and /dev/dri)."
+        )
     logger.info("Auto-selected device: %s", device)
     return device
 
@@ -96,11 +116,19 @@ def resolve_device(requested: str | None = None) -> str:
 
     # Validate the explicit request
     if device == "cuda":
+        _prepare_rocm_runtime()
         if not torch.cuda.is_available():
+            if is_rocm_system():
+                raise RuntimeError(
+                    "GPU requested but torch.cuda.is_available() is False on a ROCm host. "
+                    "Verify the AMD ROCm PyTorch wheel is installed and the container can see the GPUs "
+                    "(/dev/kfd and /dev/dri mapped into the container)."
+                )
             raise RuntimeError(
                 "CUDA requested but torch.cuda.is_available() is False. Install a CUDA-enabled PyTorch build."
             )
     elif device == "mps":
+        _prepare_rocm_runtime()
         if not hasattr(torch.backends, "mps"):
             raise RuntimeError(
                 "MPS requested but this PyTorch build has no MPS support. Install PyTorch >= 1.12 with MPS backend."
@@ -109,6 +137,8 @@ def resolve_device(requested: str | None = None) -> str:
             raise RuntimeError(
                 "MPS requested but not available on this machine. Requires Apple Silicon (M1+) with macOS 12.3+."
             )
+    elif device == "cpu":
+        _prepare_rocm_runtime()
 
     return device
 

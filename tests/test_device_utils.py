@@ -34,6 +34,12 @@ def _patch_gpu(monkeypatch, *, cuda=False, mps=False):
     monkeypatch.setattr(torch.backends, "mps", mps_backend)
 
 
+def _patch_rocm(monkeypatch, *, rocm=True):
+    """Mock ROCm host detection and runtime setup."""
+    monkeypatch.setattr("device_utils.is_rocm_system", lambda: rocm)
+    monkeypatch.setattr("device_utils.setup_rocm_env", lambda: None)
+
+
 # ---------------------------------------------------------------------------
 # detect_best_device
 # ---------------------------------------------------------------------------
@@ -46,12 +52,22 @@ class TestDetectBestDevice:
         _patch_gpu(monkeypatch, cuda=True, mps=True)
         assert detect_best_device() == "cuda"
 
+    def test_rocm_host_still_returns_cuda_when_torch_sees_gpu(self, monkeypatch):
+        _patch_gpu(monkeypatch, cuda=True, mps=False)
+        _patch_rocm(monkeypatch, rocm=True)
+        assert detect_best_device() == "cuda"
+
     def test_returns_mps_when_no_cuda(self, monkeypatch):
         _patch_gpu(monkeypatch, cuda=False, mps=True)
         assert detect_best_device() == "mps"
 
     def test_returns_cpu_when_nothing(self, monkeypatch):
         _patch_gpu(monkeypatch, cuda=False, mps=False)
+        assert detect_best_device() == "cpu"
+
+    def test_rocm_host_logs_and_falls_back_to_cpu_when_no_gpu_backend(self, monkeypatch):
+        _patch_gpu(monkeypatch, cuda=False, mps=False)
+        _patch_rocm(monkeypatch, rocm=True)
         assert detect_best_device() == "cpu"
 
 
@@ -100,6 +116,11 @@ class TestResolveDevice:
         _patch_gpu(monkeypatch, cuda=True)
         assert resolve_device("cuda") == "cuda"
 
+    def test_explicit_cuda_on_rocm_host_uses_cuda_backend_when_available(self, monkeypatch):
+        _patch_gpu(monkeypatch, cuda=True)
+        _patch_rocm(monkeypatch, rocm=True)
+        assert resolve_device("cuda") == "cuda"
+
     def test_explicit_mps(self, monkeypatch):
         _patch_gpu(monkeypatch, mps=True)
         assert resolve_device("mps") == "mps"
@@ -114,7 +135,14 @@ class TestResolveDevice:
 
     def test_cuda_unavailable_raises(self, monkeypatch):
         _patch_gpu(monkeypatch, cuda=False)
+        _patch_rocm(monkeypatch, rocm=False)
         with pytest.raises(RuntimeError, match="CUDA requested"):
+            resolve_device("cuda")
+
+    def test_cuda_unavailable_on_rocm_host_raises_rocm_specific_error(self, monkeypatch):
+        _patch_gpu(monkeypatch, cuda=False)
+        _patch_rocm(monkeypatch, rocm=True)
+        with pytest.raises(RuntimeError, match="ROCm host"):
             resolve_device("cuda")
 
     def test_mps_no_backend_raises(self, monkeypatch):

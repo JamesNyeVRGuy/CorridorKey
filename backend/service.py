@@ -201,13 +201,15 @@ class CorridorKeyService:
     def detect_device(self) -> str:
         """Detect best available compute device using centralized device_utils."""
         try:
-            from device_utils import resolve_device
+            from device_utils import is_rocm_system, resolve_device
 
+            rocm = is_rocm_system()
             self._device = resolve_device()
         except ImportError:
+            rocm = False
             self._device = "cpu"
             logger.warning("device_utils not available — using CPU")
-        logger.info(f"Compute device: {self._device}")
+        logger.info(f"Compute device: {self._device} (ROCm detected: {rocm})")
         return self._device
 
     def get_vram_info(self) -> dict[str, float]:

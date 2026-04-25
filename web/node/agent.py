@@ -248,11 +248,12 @@ class NodeAgent:
             logger.error(f"Registration failed: {e}")
             return False
 
-    def _check_gpu_ready(self) -> bool:
-        """Check if our GPU is available (not in use by other processes)."""
-        available, reason = check_gpu_available(self._gpu_indices[0])
+    def _check_gpu_ready(self, gpu_index: int | None = None) -> bool:
+        """Check if a specific GPU is available (not in use by other processes)."""
+        idx = self._gpu_indices[0] if gpu_index is None else gpu_index
+        available, reason = check_gpu_available(idx)
         if not available:
-            logger.debug(f"GPU not available: {reason}")
+            logger.debug(f"GPU {idx} not available: {reason}")
         return available
 
     def _heartbeat(self) -> bool:
@@ -291,9 +292,9 @@ class NodeAgent:
         except Exception:
             return False
 
-    def _poll_job(self) -> dict | None:
-        """Poll for the next available job. Skips if GPU is busy."""
-        if not self._check_gpu_ready():
+    def _poll_job(self, gpu_index: int | None = None) -> dict | None:
+        """Poll for the next available job. Skips if target GPU is busy."""
+        if not self._check_gpu_ready(gpu_index):
             return None
         try:
             r = self._api("get", f"/api/nodes/{self.node_id}/next-job")
@@ -836,10 +837,15 @@ class NodeAgent:
                 self._stop.wait(self.poll_interval)
                 continue
 
-            job_data = self._poll_job()
+            # Pick the first idle GPU that is actually free right now.
+            gpu_index = next((g for g in idle_gpus if self._check_gpu_ready(g)), None)
+            if gpu_index is None:
+                self._stop.wait(self.poll_interval)
+                continue
+
+            job_data = self._poll_job(gpu_index)
             if job_data:
                 _idle_polls = 0  # reset backoff
-                gpu_index = idle_gpus[0]
                 with self._busy_lock:
                     self._busy_gpus.add(gpu_index)
                 # Process in a thread so we can accept more jobs on other GPUs
